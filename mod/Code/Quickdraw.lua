@@ -7,7 +7,7 @@
 -- Unit:ProvokeOpportunityAttacksFromList in the enemy's command thread, and the AI turn waits.
 
 Quickdraw = Quickdraw or {}
-Quickdraw.version = "0.7"
+Quickdraw.version = "0.7.1"
 local R = QuickdrawRules
 
 Quickdraw.Config = {
@@ -21,7 +21,8 @@ Quickdraw.Config = {
 	reaction_time = 25,          -- BASIC_REACTION_TIME_LENGTH
 	basic_pct = 60,              -- BASIC_PERCENTAGE_APS_REGISTERED
 	log_checks = false,          -- also log each watcher of each check
-	heartbeat_ms = 5000,         -- log interval while an interrupt waits for the player
+	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
+	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
 }
 
@@ -662,9 +663,9 @@ function Quickdraw.FindAttackTrigger(mover, n)
 	return winners, rows
 end
 
-local function WinnerList(winners)
+local function RowList(rows)
 	local parts = {}
-	for i, row in ipairs(winners) do
+	for i, row in ipairs(rows) do
 		parts[i] = string.format("%s ap=%s [%s]", Name(row.unit), AP(row.unit), row.detail or "")
 	end
 	return table.concat(parts, "; ")
@@ -680,6 +681,9 @@ function Quickdraw.AddTrigger(mover, trigger_type, dummies, visible_only, return
 	end
 	if skip then
 		Count(stats.mover_skips, skip)
+		if trigger_type == "attack reaction" and not return_result then
+			Log("after-attack check by %s skipped: %s", Name(mover), skip)
+		end
 		return interrupts, provoke_idx
 	end
 
@@ -705,6 +709,9 @@ function Quickdraw.AddTrigger(mover, trigger_type, dummies, visible_only, return
 		idx = #winners > 0 and #dummies or nil
 	end
 	if not idx then
+		if trigger_type ~= "move" then
+			Log("check #%d %s after attack by %s: no winner: %s", n, system, Name(mover), #rows > 0 and RowList(rows) or "(no watcher)")
+		end
 		return interrupts, provoke_idx
 	end
 
@@ -726,7 +733,7 @@ function Quickdraw.AddTrigger(mover, trigger_type, dummies, visible_only, return
 		return interrupts, provoke_idx
 	end
 	if real then
-		Log("check #%d %s TRIGGER mover=%s at %s: %s", n, system, Name(mover), where, WinnerList(winners))
+		Log("check #%d %s TRIGGER mover=%s at %s: %s", n, system, Name(mover), where, RowList(winners))
 	else
 		-- AIExecutionController:SelectPlayingUnits runs the same check to group its units.
 		Log("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(mercs))
@@ -799,7 +806,8 @@ function Quickdraw.RegisterAction(unit, action_id, ap)
 	end
 	if #parts > 0 then
 		Quickdraw.turn_stats.registered = Quickdraw.turn_stats.registered + 1
-		Log("IIS register %s by %s cost=%d/100: %s", tostring(action_id), Name(unit), ap100, table.concat(parts, " "))
+		Log("IIS register %s by %s cost=%d/100 (%s of max %s AP): %s", tostring(action_id), Name(unit), ap100,
+			FormatAP(ap), FormatAP(mover_max), table.concat(parts, " "))
 	end
 end
 
@@ -809,6 +817,11 @@ local function StatusList(unit)
 		names[#names + 1] = tostring(effect.class)
 	end
 	return #names > 0 and table.concat(names, ",") or "(none)"
+end
+Quickdraw.StatusList = StatusList
+
+local function IsTracedEnemy(unit)
+	return g_Combat and IsKindOf(unit, "Unit") and unit.team and not E.CanControlTeam(unit)
 end
 
 function OnMsg.RunCombatAction(action_id, unit, ap)
@@ -840,6 +853,49 @@ function OnMsg.Attack(action, results, attack_args, combat_starting, attacker, t
 			set[obj] = true
 		end
 	end
+	local hit = {}
+	for u in pairs(set) do
+		hit[#hit + 1] = u
+	end
+	Log("enemy attack resolved: %s by %s target=%s units=%s cmd=%s t=%d", tostring(action and action.id), Name(attacker),
+		IsKindOf(target, "Unit") and Name(target) or tostring(target), NameList(hit), tostring(attacker.command), GameTime())
+end
+
+-- Logs the start and the end of each enemy ExecFirearmAttacks. A start without an end means that
+-- the attacker's command ended inside the attack, before the after-attack check.
+function Quickdraw.HookAttackTrace()
+	if Unit.ExecFirearmAttacks == Quickdraw.exec_hook then return end
+	local orig = Unit.ExecFirearmAttacks
+	-- GBO 4 replaces ExecFirearmAttacks and can load after this mod, so UI.lua calls this on ModsReloaded.
+	Quickdraw.exec_hook = function(self, action, cost_ap, attack_args, results, ...)
+		local traced = IsTracedEnemy(self)
+		if traced then
+			Log("enemy attack exec begin: %s by %s cost=%s ap=%s cmd=%s t=%d", tostring(action and action.id), Name(self),
+				FormatAP(cost_ap), AP(self), tostring(self.command), GameTime())
+		end
+		local r = pack_params(orig(self, action, cost_ap, attack_args, results, ...))
+		if traced then
+			Log("enemy attack exec end: %s by %s ap=%s cmd=%s t=%d", tostring(action and action.id), Name(self), AP(self),
+				tostring(self.command), GameTime())
+		end
+		return unpack_params(r)
+	end
+	Unit.ExecFirearmAttacks = Quickdraw.exec_hook
+end
+
+function Quickdraw.TraceEnemyActionEnd(unit)
+	if IsTracedEnemy(unit) then
+		Log("enemy action ended: %s ap=%s cmd=%s t=%d", Name(unit), AP(unit), tostring(unit.command), GameTime())
+	end
+end
+
+function Quickdraw.LogLoadedMods()
+	local parts = {}
+	for _, mod in ipairs(rawget(_G, "ModsLoaded") or empty_table) do
+		local ok, version = pcall(mod.GetVersionString, mod)
+		parts[#parts + 1] = string.format("%s (%s %s)", tostring(mod.title), tostring(mod.id), ok and tostring(version) or "?")
+	end
+	Log("mods loaded: %s", #parts > 0 and table.concat(parts, "; ") or "(none)")
 end
 
 -- Finds the last step of a plan that the mover reached.
@@ -875,9 +931,10 @@ function OnMsg.UnitMovementDone(unit)
 end
 
 function Quickdraw.HookStatus()
-	return string.format("check_hook=%s provoke_hook=%s",
+	return string.format("check_hook=%s provoke_hook=%s exec_trace=%s",
 		Unit.CheckProvokeOpportunityAttacks == Quickdraw.check_hook and "ours" or "REPLACED",
-		Unit.ProvokeOpportunityAttacksFromList == Quickdraw.provoke_hook and "ours" or "REPLACED")
+		Unit.ProvokeOpportunityAttacksFromList == Quickdraw.provoke_hook and "ours" or "REPLACED",
+		not Quickdraw.exec_hook and "off" or Unit.ExecFirearmAttacks == Quickdraw.exec_hook and "ours" or "REPLACED")
 end
 
 local function ResetCombatState(why)
@@ -922,6 +979,15 @@ function OnMsg.TurnStart(team_idx)
 	end
 	Log("TurnStart team=%s side=%s control=%s system=%s %s", tostring(team_idx), tostring(team and team.side),
 		tostring(team and team.control), Quickdraw.Config.system, Quickdraw.HookStatus())
+	if team and team.control ~= "UI" then
+		local parts = {}
+		for _, u in ipairs(team.units or empty_table) do
+			if IsValid(u) and not u:IsDead() then
+				parts[#parts + 1] = string.format("%s=%s/%s", Name(u), AP(u), FormatAP(E.MaxAPRaw(u)))
+			end
+		end
+		Log("  AP/max AP at turn start: %s", #parts > 0 and table.concat(parts, ", ") or "(none)")
+	end
 end
 
 function OnMsg.TurnEnded(team_idx)

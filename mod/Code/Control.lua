@@ -225,8 +225,19 @@ local function AddCollective(st_mercs, mover, n)
 	local joined = {}
 	for _, leader in ipairs(originals) do
 		for _, mate in ipairs(E.PlayerUnits()) do
-			if not table.find(st_mercs, mate) and not Quickdraw.ObserverSkipReason(mate, mover)
-				and not Quickdraw.WinSkipReason(mate, "IIS") and E.DistTiles(leader, mate:GetPos()) <= rc.collective_radius then
+			local skip = table.find(st_mercs, mate) and "interrupter"
+				or Quickdraw.ObserverSkipReason(mate, mover) or Quickdraw.WinSkipReason(mate, "IIS")
+			if not skip then
+				local dist = E.DistTiles(leader, mate:GetPos())
+				if dist > rc.collective_radius then
+					skip = string.format("%d tiles away (max %d)", dist, rc.collective_radius)
+				end
+			end
+			if skip then
+				if skip ~= "interrupter" then
+					Log("INT #%d collective: %s -> %s skipped: %s", n, Name(leader), Name(mate), skip)
+				end
+			else
 				local chance = R.CollectiveChance(
 					{ leadership = leader:GetProperty("Leadership"), level = leader:GetLevel() },
 					{ level = mate:GetLevel(), agility = mate:GetProperty("Agility"), wisdom = mate:GetProperty("Wisdom") })
@@ -375,8 +386,12 @@ function Quickdraw.RunInterrupt(mover, info, dummy)
 				for _, m in ipairs(st.mercs) do
 					aps[#aps + 1] = string.format("%s=%s%s", Name(m), AP(m), MercBusy(m) and "(busy)" or "")
 				end
-				Log("INT #%d waiting +%ss: %s queue=%d end_requested=%s | %s | %s", st.n, tostring(elapsed / 1000),
-					table.concat(aps, " "), #st.queue, tostring(st.end_requested), UIState(st), RunningStateSnapshot())
+				local line = string.format("%s queue=%d end_requested=%s | %s | %s", table.concat(aps, " "), #st.queue,
+					tostring(st.end_requested), UIState(st), RunningStateSnapshot())
+				if line ~= st.wait_line or elapsed - st.wait_logged >= cfg.heartbeat_repeat_ms then
+					st.wait_line, st.wait_logged = line, elapsed
+					Log("INT #%d waiting +%ss: %s", st.n, tostring(elapsed / 1000), line)
+				end
 			end)
 		end
 	end
@@ -648,7 +663,8 @@ local function OnInterrupterActionStep(unit, what)
 	if not st or not st.is_merc[unit] then return end
 	st.last_activity = GameTime()
 	if what == "end" then
-		Log("INT #%d merc %s action ended: ap_left=%s pos=%s | %s", st.n, Name(unit), AP(unit), Pos(unit), RunningStateSnapshot())
+		Log("INT #%d merc %s action ended: ap_left=%s pos=%s status=%s | %s", st.n, Name(unit), AP(unit), Pos(unit),
+			Quickdraw.StatusList(unit), RunningStateSnapshot())
 		SafeCall(st, "UI.Refresh", Quickdraw.UI.Refresh, st)
 		-- The frozen enemy's running action suspends VisibilityUpdate (Visibility.lua:1110), so a
 		-- merc that moved would not see new enemies without a forced update.
@@ -660,6 +676,7 @@ local function OnInterrupterActionStep(unit, what)
 end
 
 function OnMsg.CombatActionEnd(unit)
+	Quickdraw.TraceEnemyActionEnd(unit)
 	OnInterrupterActionStep(unit, "end")
 end
 

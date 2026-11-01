@@ -6,7 +6,7 @@ This is throwaway code. A rewrite comes after the proof of concept.
 
 ## Status
 
-Version 0.7 has all parts of the proof of concept. It passes `tools/test.sh`. Nobody tested it in the game yet. Version poc-0.6 passed in-game tests with one merc on 2026-10-25.
+Version 0.7 has all parts of the proof of concept. It passed an in-game test on 2026-11-01 with three mercs against one enemy, with GBO 4 and Rato's AI Overhaul loaded. In that test, the interrupts after an enemy attack did not occur. Version 0.7.1 adds log lines to find the cause.
 
 During the enemy turn, mercs win interrupts by the 1.13 rules. The enemy stops, and only the mercs that won can take orders. Press End Turn (Enter) to end the interrupt. Then the enemy turn continues.
 
@@ -114,16 +114,23 @@ All lines start with `[Quickdraw]`. `tools/log.sh` also shows `[LUA ERROR]` line
 
 | Line | Meaning |
 |---|---|
-| `... loaded 0.7`, `control loaded`, `UI loaded` | The game ran the code files. Each hook status must say `ours`. |
+| `... loaded 0.7.1`, `control loaded`, `UI loaded` | The game ran the code files. Each hook status must say `ours`. |
+| `mods loaded` | The title, id and version of each loaded mod. |
 | `check #N IIS TRIGGER` or `check #N Classic TRIGGER` | A check found winners. Each winner shows its numbers: points (classic) or count and reaction time (IIS). |
 | `trigger in an AI planning check` | The AI ran the same check to group its units. Nothing happens yet. |
-| `IIS register` | A seen enemy action added AP to the mercs' counts. |
+| `IIS register` | A seen enemy action added AP to the mercs' counts. The line shows the cost as a share of 100 and the enemy's AP and maximum AP. |
+| `AP/max AP at turn start` | The AP and the maximum AP of each AI unit when its turn starts. |
+| `enemy attack exec begin`, `enemy attack exec end` | An enemy firearm attack (`Unit:ExecFirearmAttacks`) started or ended. A `begin` without an `end` means that the enemy's command stopped inside the attack. |
+| `enemy attack resolved` | The game resolved an enemy attack (`Msg("Attack")`). The line names the target and the units in the attack. |
+| `after-attack check by ... skipped` | The check after an attack did not run. The line gives the reason. |
+| `check #N ... after attack by ...: no winner` | The check after an attack ran, but no merc won. The line shows the count and the reaction time of each merc. |
+| `enemy action ended` | The combat action of an AI unit ended. |
 | `IIS commit` | The steps that an enemy walked added AP to the counts. |
 | `INT #N BEGIN`, `interrupter K` | The interrupt started, and the list of interrupters. |
-| `INT #N collective` | A collective interrupt roll: chance, roll and result. |
+| `INT #N collective` | A collective interrupt roll: chance, roll and result. A `skipped` line gives the reason that a teammate did not roll. |
 | `INT #N UI shown` | The banner, portraits, button and camera. `end_turn_button=live` means that the button was found. |
 | `INT #N run action`, `merc ... action ended` | An interrupter action started or ended. |
-| `INT #N waiting +Ns` | Sent every 5 seconds while the interrupt waits. |
+| `INT #N waiting +Ns` | The state of the interrupt while it waits. The mod checks the state every 5 seconds. It writes the line when the state changes, and every 30 seconds while the state does not change. |
 | `INT #N STUCK?` | A merc stayed busy for more than 10 seconds. The stack follows if the game allows it. |
 | `INT #N end requested`, `INT #N END` | End Turn was pressed, and the interrupt ended. `END` shows the reason and the AP of each interrupter. |
 | `enemy ... stops at` | "Stop" mode: the enemy stays on its tile and gets back AP. |

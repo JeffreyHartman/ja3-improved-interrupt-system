@@ -359,6 +359,8 @@ end
 function OnMsg.ModsReloaded()
 	Quickdraw.SafeCall(nil, "UI patch", UI.PatchEndTurnTemplate)
 	Quickdraw.SafeCall(nil, "UI preset", UI.EnsureBannerPreset)
+	Quickdraw.SafeCall(nil, "attack trace", Quickdraw.HookAttackTrace)
+	Quickdraw.SafeCall(nil, "mod list", Quickdraw.LogLoadedMods)
 	Log("ModsReloaded: Quickdraw %s active, %s", Quickdraw.version, Quickdraw.HookStatus())
 end
 

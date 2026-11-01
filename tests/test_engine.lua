@@ -525,6 +525,18 @@ t.case("IIS after an attack: a full counter wins if the merc sees or was attacke
 	t.eq(#list[1][3].mercs, 2)
 end)
 
+t.case("After an attack: the log names the skip reason, or each watcher when nobody wins", function()
+	local mover, a = IISSetup()
+	world.sees[a] = { [mover] = true }
+	Q.active = { n = 9 }
+	Q.AddTrigger(mover, "attack reaction", { mover })
+	t.eq(LogHas("after%-attack check by enemy.* skipped: interrupt active"), true)
+	Q.active = false
+	local list = Q.AddTrigger(mover, "attack reaction", { mover })
+	t.eq(list, nil)
+	t.eq(LogHas("after attack by enemy.*: no winner: a.*counter 0, reaction time %d+, sees attacker"), true)
+end)
+
 t.case("Classic after an attack: only an attacked merc that did not see the attacker duels", function()
 	ResetWorld()
 	Q.Config.system = "Classic"
