@@ -1,8 +1,8 @@
-# Quickdraw (POC)
+# Improved Interrupt System
 
-Proof of concept for player-controlled interrupts in Jagged Alliance 3, with the rules of JA2 1.13. The research is in `../interrupts/` (`HANDOFF.md`, `QUICKDRAW_FINDINGS.md`, `JA2_113_INTERRUPTS.md`).
+A Jagged Alliance 3 mod for player-controlled interrupts with the rules of JA2 1.13. During the enemy turn, your mercs can interrupt by the 1.13 Improved Interrupt System (IIS) or by the classic duel. Then you give orders to the mercs that interrupted.
 
-This is throwaway code. A rewrite comes after the proof of concept.
+This version is a proof of concept. A rewrite comes after it.
 
 ## Status
 
@@ -10,13 +10,13 @@ Version 0.7 has all parts of the proof of concept. It passed an in-game test on 
 
 During the enemy turn, mercs win interrupts by the 1.13 rules. The enemy stops, and only the mercs that won can take orders. Press End Turn (Enter) to end the interrupt. Then the enemy turn continues.
 
-To turn the mod off, set the "Quickdraw enabled" mod option to off. Do not disable the mod in the Mod Manager. A save that used Quickdraw turns it on again when you load it.
+To turn the mod off, set the "Interrupts enabled" mod option to off. Do not disable the mod in the Mod Manager. A save that used the mod turns it on again when you load it.
 
 ## Mod options
 
 | Option | Default | Effect |
 |---|---|---|
-| Quickdraw enabled | on | Off: no interrupts. |
+| Interrupts enabled | on | Off: no interrupts. |
 | Interrupt system | IIS | IIS: each merc counts the AP that a seen enemy spends, and interrupts when the count reaches its reaction time. Classic: a duel of level and Agility when an enemy comes into view. |
 | Collective interrupts (IIS) | on | Teammates within 5 tiles of a winner can join the interrupt by chance. |
 | Interrupted enemy | Stop | Stop: the enemy stays on its tile, gets back the AP for the rest of its path, and attacks from there. Continue: it walks on to its destination. |
@@ -51,18 +51,18 @@ To turn the mod off, set the "Quickdraw enabled" mod option to off. Do not disab
 | File | What it does |
 |---|---|
 | `Code/Rules.lua` | The 1.13 formulas. It makes no engine calls. |
-| `Code/Quickdraw.lua` | Settings, log, trigger checks, IIS counts and what each unit saw. `Quickdraw.E` holds every engine read, so the tests can replace it. |
+| `Code/IIS.lua` | Settings, log, trigger checks, IIS counts and what each unit saw. `IIS.E` holds every engine read, so the tests can replace it. |
 | `Code/Control.lua` | Runs an interrupt and gives control to the interrupters. |
 | `Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
 
-The trigger is a `"quickdraw"` entry that the wrapper of `Unit:CheckProvokeOpportunityAttacks` adds to the vanilla interrupt list. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
+The trigger is a `"iis"` entry that the wrapper of `Unit:CheckProvokeOpportunityAttacks` adds to the vanilla interrupt list. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
 
 Overrides in `Control.lua`. Each one changes behavior only while an interrupt is active:
 
 | Override | Why |
 |---|---|
 | `IsNetPlayerTurn` | Returns true. The UI and the action start code ask it whose turn it is. |
-| `Unit:CanBeControlled` | True for the interrupters. False, with the reason `quickdraw_not_interrupter`, for the other player units. |
+| `Unit:CanBeControlled` | True for the interrupters. False, with the reason `iis_not_interrupter`, for the other player units. |
 | `CombatActionCannotBeStarted` | Counts only the interrupters' running actions. The frozen enemy's action never ends during the interrupt. |
 | `StartCombatAction` | Runs the interrupters' actions in a small queue with the vanilla start rule, applied to the interrupters only. |
 | `Unit:IsIdleOrRunningBehavior` | Returns true for the frozen enemy. `Unit:FirearmAttack` waits until its target is idle. |
@@ -76,15 +76,15 @@ Overrides in `Control.lua`. Each one changes behavior only while an interrupt is
 
 Run `tools/test.sh`. The script checks the syntax of each mod file with `luac5.4`, then runs the tests with `lua5.4`:
 
-- `tests/test_rules.lua` checks the formulas against the worked examples of `JA2_113_INTERRUPTS.md`.
-- `tests/test_engine.lua` loads `Quickdraw.lua` and `Control.lua` with fake engine functions. It checks the trigger checks, the IIS counts, the merge with vanilla interrupts, the control overrides, the action queue and the stop of the enemy.
+- `tests/test_rules.lua` checks the formulas against worked examples from the 1.13 source code.
+- `tests/test_engine.lua` loads `IIS.lua` and `Control.lua` with fake engine functions. It checks the trigger checks, the IIS counts, the merge with vanilla interrupts, the control overrides, the action queue and the stop of the enemy.
 
 The tests do not cover `UI.lua` or anything that needs the game.
 
 ## In-game test procedure
 
-1. Run `tools/deploy.sh`. The script copies `mod/` to `Mods/Quickdraw` in the game folder.
-2. Start the game and enable "Quickdraw (POC)" in the Mod Manager.
+1. Run `tools/deploy.sh`. The script copies `mod/` to `Mods/ImprovedInterruptSystem` in the game folder.
+2. Start the game and enable "Improved Interrupt System" in the Mod Manager.
 3. Load a combat save and end the turn.
 4. Run `tools/log.sh -f` to follow the log while the game runs.
 
@@ -110,7 +110,7 @@ Things to test:
 
 ## Log lines
 
-All lines start with `[Quickdraw]`. `tools/log.sh` also shows `[LUA ERROR]` lines with their stack, and mod load errors.
+All lines start with `[IIS]`. `tools/log.sh` also shows `[LUA ERROR]` lines with their stack, and mod load errors.
 
 | Line | Meaning |
 |---|---|

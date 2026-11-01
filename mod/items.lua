@@ -1,7 +1,7 @@
 return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "Enabled",
-		'DisplayName', "Quickdraw enabled",
+		'DisplayName', "Interrupts enabled",
 		'Help', "Off: no interrupts. The mod stays loaded because saves turn it back on.",
 		'DefaultValue', true,
 	}),
@@ -72,8 +72,8 @@ return {
 		'CodeFileName', "Code/Rules.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "Quickdraw",
-		'CodeFileName', "Code/Quickdraw.lua",
+		'name', "IIS",
+		'CodeFileName', "Code/IIS.lua",
 	}),
 	PlaceObj('ModItemCode', {
 		'name', "Control",

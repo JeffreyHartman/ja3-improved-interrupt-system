@@ -2,11 +2,11 @@
 -- (paths relative to _reference/ja2_113/source at commit 81ecd82). The file makes no engine
 -- calls, so tools/test.sh runs it with a plain Lua interpreter.
 --
--- Soldier tables hold plain values that Quickdraw.lua reads from JA3 units. AP values that go
+-- Soldier tables hold plain values that IIS.lua reads from JA3 units. AP values that go
 -- into the IIS formulas are on the 1.13 scale, where a full turn is 100 AP (ToScale100).
 
-QuickdrawRules = {}
-local R = QuickdrawRules
+IISRules = {}
+local R = IISRules
 
 R.Defaults = {
 	min_aps_to_interrupt = 16, -- APBPConstants.ini MIN_APS_TO_INTERRUPT (classic)
@@ -158,7 +158,7 @@ end
 -- w: agility, ap, max_ap (same unit), life, life_max, bleeding, level, breath (0-100),
 --    gassed, getting_aid, shock
 -- 1.13 reads breath from the mover, which its own comment calls a watcher penalty.
--- Quickdraw passes the watcher's fatigue, as the comment intends.
+-- This mod passes the watcher's fatigue, as the comment intends.
 function R.IISReactionTime(w, cfg)
 	cfg = cfg or R.Defaults
 	local rt = cfg.reaction_time * 10

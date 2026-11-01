@@ -1,13 +1,14 @@
--- Quickdraw UI: the interrupt banner, the portrait marks, the End Turn label, the camera and the
--- sounds. Control.lua calls UI.Begin, UI.Refresh and UI.End; each call runs under pcall there.
+-- Improved Interrupt System UI: the interrupt banner, the portrait marks, the End Turn label,
+-- the camera and the sounds. Control.lua calls UI.Begin, UI.Refresh and UI.End; each call runs
+-- under pcall there.
 
-Quickdraw.UI = Quickdraw.UI or {}
-local UI = Quickdraw.UI
-local Log, Name = Quickdraw.Log, Quickdraw.Name
+IIS.UI = IIS.UI or {}
+local UI = IIS.UI
+local Log, Name = IIS.Log, IIS.Name
 
 -- A TacticalNotification is the banner at the top center of the screen ("Enemy Turn"). A lower
 -- SortKey wins, and the enemy turn banners use 0 or more.
-local banner_id = "quickdrawInterrupt"
+local banner_id = "iisInterrupt"
 local banner_sort_key = -1000
 
 local tag_styles = {
@@ -71,7 +72,7 @@ function UI.ShowBanner(st)
 	end
 	-- ShowTacticalNotification ignores a mode that is already shown, so a new text needs a hide first.
 	HideTacticalNotification(banner_id, true)
-	local living = Quickdraw.LivingInterrupters(st)
+	local living = IIS.LivingInterrupters(st)
 	ShowTacticalNotification(banner_id, true, nil, {
 		names = NamesText(#living > 0 and living or st.mercs),
 		mover = DisplayName(st.mover),
@@ -89,7 +90,7 @@ end
 
 -- "interrupter", "locked" or nil for a portrait context.
 function UI.PortraitMark(unit)
-	local st = Quickdraw.active
+	local st = IIS.active
 	if not st or not IsKindOf(unit, "Unit") or not unit.team or unit.team.control ~= "UI" or unit:IsDead() then
 		return
 	end
@@ -100,7 +101,7 @@ function UI.PortraitMark(unit)
 end
 
 local function EnsureTag(win)
-	local tag = win.qd_tag
+	local tag = win.iis_tag
 	if tag and tag.window_state ~= "destroying" and tag.parent then
 		return tag
 	end
@@ -125,7 +126,7 @@ local function EnsureTag(win)
 	if parent.window_state == "open" then
 		tag:Open()
 	end
-	win.qd_tag = tag
+	win.iis_tag = tag
 	return tag
 end
 
@@ -139,8 +140,8 @@ local function ApplyMark(win, mark)
 		win.idPortrait:SetDesaturation(0)
 		win:SetTransparency(0)
 		-- SetupStyle never sets the glow size, so the mark keeps the old one to put back.
-		if win.qd_glow_size == nil then
-			win.qd_glow_size = win.idContent.BackgroundRectGlowSize
+		if win.iis_glow_size == nil then
+			win.iis_glow_size = win.idContent.BackgroundRectGlowSize
 		end
 		win.idContent:SetBackground(interrupter_glow)
 		win.idContent:SetBackgroundRectGlowSize(2)
@@ -160,23 +161,23 @@ function HUDMercClass:SetupStyle(...)
 	local ok, mark = pcall(UI.PortraitMark, self.context)
 	mark = ok and mark or nil
 	-- SetupStyle returns early when its style string did not change, so a mark change clears it.
-	if mark ~= self.qd_mark then
+	if mark ~= self.iis_mark then
 		self.style = false
 	end
 	local result = orig_SetupStyle(self, ...)
-	self.qd_mark = mark
+	self.iis_mark = mark
 	if mark then
 		local applied, err = pcall(ApplyMark, self, mark)
 		if not applied then
 			Log("UI portrait mark %s failed for %s: %s", tostring(mark), Name(self.context), tostring(err))
 		end
 	else
-		if self.qd_tag and self.qd_tag.window_state ~= "destroying" then
-			self.qd_tag:SetVisible(false)
+		if self.iis_tag and self.iis_tag.window_state ~= "destroying" then
+			self.iis_tag:SetVisible(false)
 		end
-		if self.qd_glow_size ~= nil then
-			self.idContent:SetBackgroundRectGlowSize(self.qd_glow_size)
-			self.qd_glow_size = nil
+		if self.iis_glow_size ~= nil then
+			self.idContent:SetBackgroundRectGlowSize(self.iis_glow_size)
+			self.iis_glow_size = nil
 		end
 	end
 	return result
@@ -208,7 +209,7 @@ local function WrapEndTurnUpdate(orig)
 		if orig then
 			result = orig(self, context, ...)
 		end
-		local st = Quickdraw.active
+		local st = IIS.active
 		if st and self.idLargeText then
 			self.idLargeText:SetText(Untranslated(EndTurnLabel(st)))
 		end
@@ -240,9 +241,9 @@ function UI.PatchEndTurnTemplate()
 		Log("UI: idTurn not found in XTemplates.IModeCombatMovement, the End Turn label stays vanilla")
 		return false
 	end
-	if not node.qd_patched then
+	if not node.iis_patched then
 		node.OnContextUpdate = WrapEndTurnUpdate(node.OnContextUpdate)
-		node.qd_patched = true
+		node.iis_patched = true
 		Log("UI: End Turn button template patched")
 	end
 	UI.end_turn_node = node
@@ -259,9 +260,9 @@ end
 
 function UI.RefreshEndTurnButton()
 	local button = LiveEndTurnButton()
-	if button and not button.qd_patched then
+	if button and not button.iis_patched then
 		button.OnContextUpdate = WrapEndTurnUpdate(button.OnContextUpdate)
-		button.qd_patched = true
+		button.iis_patched = true
 	end
 	ObjModified(Selection)
 	return button and true or false
@@ -291,7 +292,7 @@ end
 -- Calls from Control.lua
 
 function UI.Begin(st)
-	local safe = Quickdraw.SafeCall
+	local safe = IIS.SafeCall
 	safe(st, "UI patch", UI.PatchEndTurnTemplate)
 	safe(st, "UI banner", UI.ShowBanner, st)
 	local portraits = 0
@@ -323,19 +324,19 @@ end
 
 -- Called when an action ends, a merc goes down or End Turn is pressed.
 function UI.Refresh(st)
-	if Quickdraw.active ~= st then
+	if IIS.active ~= st then
 		return
 	end
-	local safe = Quickdraw.SafeCall
+	local safe = IIS.SafeCall
 	safe(st, "UI banner", UI.ShowBanner, st)
 	safe(st, "UI portraits", UI.RefreshPortraits)
 	safe(st, "UI end turn", UI.RefreshEndTurnButton)
 end
 
 function UI.End(st, reason)
-	local safe = Quickdraw.SafeCall
+	local safe = IIS.SafeCall
 	safe(st, "UI banner", UI.HideBanner)
-	-- Quickdraw.active is already false here, so the portraits and the button go back to vanilla.
+	-- IIS.active is already false here, so the portraits and the button go back to vanilla.
 	safe(st, "UI portraits", UI.RefreshPortraits)
 	safe(st, "UI end turn", UI.RefreshEndTurnButton)
 	safe(st, "UI sound", PlayFX, "PlayerCombatTurnEnd", "start")
@@ -350,19 +351,19 @@ function UI.HookStatus()
 	if HUDMercClass.SetupStyle ~= UI.setup_style_hook then
 		replaced[#replaced + 1] = "SetupStyle"
 	end
-	if UI.end_turn_node and UI.end_turn_node.qd_patched ~= true then
+	if UI.end_turn_node and UI.end_turn_node.iis_patched ~= true then
 		replaced[#replaced + 1] = "EndTurnButton"
 	end
 	return "ui_hooks=" .. (#replaced == 0 and "ours" or ("REPLACED:" .. table.concat(replaced, ",")))
 end
 
 function OnMsg.ModsReloaded()
-	Quickdraw.SafeCall(nil, "UI patch", UI.PatchEndTurnTemplate)
-	Quickdraw.SafeCall(nil, "UI preset", UI.EnsureBannerPreset)
-	Quickdraw.SafeCall(nil, "attack trace", Quickdraw.HookAttackTrace)
-	Quickdraw.SafeCall(nil, "mod list", Quickdraw.LogLoadedMods)
-	Log("ModsReloaded: Quickdraw %s active, %s", Quickdraw.version, Quickdraw.HookStatus())
+	IIS.SafeCall(nil, "UI patch", UI.PatchEndTurnTemplate)
+	IIS.SafeCall(nil, "UI preset", UI.EnsureBannerPreset)
+	IIS.SafeCall(nil, "attack trace", IIS.HookAttackTrace)
+	IIS.SafeCall(nil, "mod list", IIS.LogLoadedMods)
+	Log("ModsReloaded: IIS %s active, %s", IIS.version, IIS.HookStatus())
 end
 
-Quickdraw.SafeCall(nil, "UI patch", UI.PatchEndTurnTemplate)
+IIS.SafeCall(nil, "UI patch", UI.PatchEndTurnTemplate)
 Log("UI loaded: %s", UI.HookStatus())

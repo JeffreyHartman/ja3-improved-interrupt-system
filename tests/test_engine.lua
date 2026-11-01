@@ -1,9 +1,9 @@
--- Tests for the game-side logic in mod/Code/Quickdraw.lua and mod/Code/Control.lua. They load the
--- real files with fake engine globals, then replace Quickdraw.E (the engine reads) with fakes.
+-- Tests for the game-side logic in mod/Code/IIS.lua and mod/Code/Control.lua. They load the
+-- real files with fake engine globals, then replace IIS.E (the engine reads) with fakes.
 -- They do not cover UI.lua or anything that needs a running game.
 
 local t = Test
-local R = QuickdrawRules
+local R = IISRules
 
 ------------------------------------------------------------------------------------------------
 -- Fake engine globals, just enough to load the two files.
@@ -146,10 +146,10 @@ NetSyncEvents = { EndTurn = function() return "vanilla" end }
 NetSyncLocalEffects = { EndTurn = function() return "vanilla" end }
 OnMsg = {}
 
-dofile("mod/Code/Quickdraw.lua")
+dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
 
-local Q = Quickdraw
+local Q = IIS
 local E = Q.E
 
 ------------------------------------------------------------------------------------------------
@@ -207,7 +207,7 @@ local function ResetWorld()
 	Q.plans = {}
 	Q.attack_targets = {}
 	Q.active = false
-	gv_Quickdraw = { seen_turn = {}, seen_ever = {} }
+	gv_IIS = { seen_turn = {}, seen_ever = {} }
 	vanilla_result = {}
 	Q.Config.enabled = true
 	Q.Config.system = "IIS"
@@ -320,7 +320,7 @@ t.case("Classic: the earliest winning step wins, a loser before it does not bloc
 	world.los[b] = Steps(3)
 	world.los[weak] = Steps(2, 3)
 	world.los[saw] = Steps(2)
-	gv_Quickdraw.seen_turn.saw = { enemy = true }
+	gv_IIS.seen_turn.saw = { enemy = true }
 	local dummies = Path(mover, 4)
 	local idx, winners = Q.FindClassicMoveTrigger(mover, dummies, 1)
 	t.eq(idx, 3)
@@ -466,7 +466,7 @@ t.case("AddTrigger: on the same step ours runs first", function()
 	local vanilla = { { "overwatch" } }
 	local list, idx = Q.AddTrigger(mover, "move", Path(mover, 6), nil, nil, vanilla, 4)
 	t.eq(idx, 4)
-	t.eq(list[1][1], "quickdraw")
+	t.eq(list[1][1], "iis")
 	t.eq(list[2][1], "overwatch")
 	t.eq(list[1][3].step, 4)
 end)
@@ -477,7 +477,7 @@ t.case("AddTrigger: a later vanilla interrupt is dropped until the next check", 
 	local list, idx = Q.AddTrigger(mover, "move", dummies, nil, nil, { { "overwatch" } }, 6)
 	t.eq(idx, 4)
 	t.eq(#list, 1)
-	t.eq(list[1][1], "quickdraw")
+	t.eq(list[1][1], "iis")
 	t.eq(list[1][2], a)
 	t.eq(list[1][4], dummies[4])
 	t.eq(list[1][3].kind, "move")
@@ -495,10 +495,10 @@ end)
 t.case("The check wrapper returns nothing for a stopped mover", function()
 	local mover = IISSetup(10)
 	mover.command_thread = "thread"
-	mover.qd_stopped = "thread"
+	mover.iis_stopped = "thread"
 	vanilla_result = { interrupts = { { "overwatch" } }, idx = 2 }
 	t.eq(Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6)), nil)
-	mover.qd_stopped = "old thread"
+	mover.iis_stopped = "old thread"
 	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6))
 	t.eq(list[1][1], "overwatch")
 end)
@@ -573,7 +573,7 @@ t.case("CanBeControlled: interrupters yes, other player units no, enemies vanill
 	t.eq(Unit.CanBeControlled(a), true)
 	local ok, reason = Unit.CanBeControlled(b)
 	t.eq(ok, false)
-	t.eq(reason, "quickdraw_not_interrupter")
+	t.eq(reason, "iis_not_interrupter")
 	t.eq(Unit.CanBeControlled(enemy), "vanilla")
 	a.down = true
 	t.eq(Unit.CanBeControlled(a), false)
@@ -673,7 +673,7 @@ t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of 
 	t.eq(#enemy.combat_path, 1)
 	t.eq(enemy.combat_path[1], here)
 	t.eq(enemy.ActionPoints, 5000)
-	t.eq(enemy.qd_stopped, "cmd")
+	t.eq(enemy.iis_stopped, "cmd")
 	t.eq(LogHas("stops at"), true)
 end)
 
@@ -686,15 +686,15 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	st.dummy = { pos = { x = 1, y = 0 } }
 	Q.StopMover(st)
 	t.eq(enemy.combat_path[1], "dest")
-	t.eq(enemy.qd_stopped, nil)
+	t.eq(enemy.iis_stopped, nil)
 end)
 
 t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	ResetWorld()
 	local query = {}
 	OnMsg.CanSaveGameQuery(query)
-	t.eq(query.quickdraw_interrupt, nil)
+	t.eq(query.iis_interrupt, nil)
 	ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
 	OnMsg.CanSaveGameQuery(query)
-	t.eq(query.quickdraw_interrupt, true)
+	t.eq(query.iis_interrupt, true)
 end)

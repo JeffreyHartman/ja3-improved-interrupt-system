@@ -1,4 +1,4 @@
--- Runs the Quickdraw tests with a plain Lua interpreter: lua5.4 tests/run.lua
+-- Runs the tests with a plain Lua interpreter: lua5.4 tests/run.lua
 -- Run it from the repository root. tools/test.sh does that.
 
 Test = { passed = 0, failed = 0, failures = {} }

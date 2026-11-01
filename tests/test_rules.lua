@@ -1,7 +1,7 @@
--- Tests for QuickdrawRules (mod/Code/Rules.lua). The worked examples come from
+-- Tests for IISRules (mod/Code/Rules.lua). The worked examples come from
 -- interrupts/JA2_113_INTERRUPTS.md, sections 1.7 and 2.6.
 
-local R = QuickdrawRules
+local R = IISRules
 local t = Test
 
 t.case("idiv truncates toward zero like C", function()

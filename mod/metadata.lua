@@ -1,7 +1,7 @@
 return PlaceObj('ModDef', {
-	'title', "Quickdraw (POC)",
-	'description', "Proof of concept for player-controlled interrupts in the style of JA2 1.13. During the enemy turn, a merc can win an interrupt by the 1.13 rules (Improved Interrupt System or the classic duel). The enemy stops, and the mercs that won take orders until you press End Turn. Then the enemy turn continues. Every step writes a [Quickdraw] line to the game log.",
-	'id', "Quickdraw",
+	'title', "Improved Interrupt System",
+	'description', "Proof of concept for player-controlled interrupts with the rules of JA2 1.13. During the enemy turn, a merc can win an interrupt by the 1.13 IIS rules or by the classic duel. The enemy stops, and the mercs that won take orders until you press End Turn. Then the enemy turn continues. Every step writes an [IIS] line to the game log.",
+	'id', "ImprovedInterruptSystem",
 	'author', "jeff",
 	'version_major', 0,
 	'version_minor', 7,
@@ -10,7 +10,7 @@ return PlaceObj('ModDef', {
 	'saved_with_revision', 366685,
 	'code', {
 		"Code/Rules.lua",
-		"Code/Quickdraw.lua",
+		"Code/IIS.lua",
 		"Code/Control.lua",
 		"Code/UI.lua",
 	},
