@@ -62,3 +62,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the code layout, the tests an
 ## Credits
 
 The interrupt rules come from the [JA2 1.13](https://github.com/1dot13/source) project.
+
+## License
+
+[MIT](LICENSE)
