@@ -7,7 +7,7 @@
 -- Unit:ProvokeOpportunityAttacksFromList in the enemy's command thread, and the AI turn waits.
 
 IIS = IIS or {}
-IIS.version = "0.7.1"
+IIS.version = "0.7.2"
 local R = IISRules
 
 IIS.Config = {
