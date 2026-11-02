@@ -11,17 +11,19 @@ t.case("idiv truncates toward zero like C", function()
 	t.eq(R.idiv(0, 5), 0)
 end)
 
-t.case("ToScale100 maps a full turn to 100 and rounds half up", function()
-	t.eq(R.ToScale100(12000, 12000), 100)
-	t.eq(R.ToScale100(1000, 12000), 8)   -- 8.33
-	t.eq(R.ToScale100(1500, 12000), 13)  -- 12.5 rounds up
-	t.eq(R.ToScale100(500, 0), 0)
+t.case("To113AP converts 12 vanilla AP to 100 1.13 AP and rounds half up", function()
+	t.eq(R.To113AP(12000), 100)
+	t.eq(R.To113AP(1000), 8)    -- a walk step, 8 AP in 1.13
+	t.eq(R.To113AP(10000), 83)  -- the shot from the issue #1 log
+	t.eq(R.To113AP(1500), 13)   -- 12.5 rounds up
+	t.eq(R.To113AP(0), 0)
 end)
 
-t.case("MinAP: classic is 16% of the turn with one step as the floor", function()
-	t.eq(R.MinAP("Classic", 12000, 1000), 1920)
-	t.eq(R.MinAP("Classic", 5000, 1000), 1000)
-	t.eq(R.MinAP("IIS", 12000, 1000), 480)
+t.case("MinAP: 16 1.13 AP for Classic, 4 for IIS, and one step as the Classic floor", function()
+	t.eq(R.MinAP("Classic", 1000), 1920)
+	t.eq(R.MinAP("Classic", 3000), 3000)
+	t.eq(R.MinAP("IIS", 1000), 480)
+	t.eq(R.MinAP("IIS", 3000), 480)
 end)
 
 -- Section 1.7: watcher level 5, agility 85, 15 tiles away, passive.

@@ -431,7 +431,7 @@ function IIS.WinSkipReason(w, system)
 		if E.Status(w, id) then return id end
 	end
 	local ap = E.APRaw(w)
-	local min = R.MinAP(system, E.MaxAPRaw(w), E.WalkRaw(), IIS.RulesConfig())
+	local min = R.MinAP(system, E.WalkRaw(), IIS.RulesConfig())
 	if ap < min then return "AP below minimum" end
 	if IIS.Config.require_attack_ap then
 		local cost = E.AttackCostRaw(w)
@@ -541,7 +541,6 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 	local stats = IIS.turn_stats
 	local rc = IIS.RulesConfig()
 	local first = FirstStep(mover, dummies)
-	local mover_max = E.MaxAPRaw(mover)
 	local rows = {}
 	for _, w in ipairs(E.PlayerUnits()) do
 		local skip = IIS.ObserverSkipReason(w, mover)
@@ -557,8 +556,7 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 				if E.WatcherSeesStep(w, mover, dummy) then
 					row.los[i] = true
 					local pct = IIS.RegisteredPercent(w, mover, dummy.pos)
-					local ap100 = R.ToScale100(E.StepRaw(dummy.stance or mover.stance), mover_max)
-					row.adds[i] = R.IISRegisteredAP(ap100, pct)
+					row.adds[i] = R.IISRegisteredAP(R.To113AP(E.StepRaw(dummy.stance or mover.stance)), pct)
 				end
 			end
 			stats.checked = stats.checked + 1
@@ -793,21 +791,20 @@ IIS.attack_targets = IIS.attack_targets or {}
 -- IIS: a seen enemy's action registers part of its AP with each watcher (Points.cpp:947).
 -- Moves register per step in the move check instead.
 function IIS.RegisterAction(unit, action_id, ap)
-	local mover_max = E.MaxAPRaw(unit)
-	local ap100 = R.ToScale100(ap, mover_max)
+	local ap113 = R.To113AP(ap)
 	local parts = {}
 	for _, w in ipairs(E.PlayerUnits()) do
 		if not IIS.ObserverSkipReason(w, unit) and E.SeesNow(w, unit) then
 			local pct = IIS.RegisteredPercent(w, unit, unit:GetPos())
-			local add = R.IISRegisteredAP(ap100, pct)
+			local add = R.IISRegisteredAP(ap113, pct)
 			AddCounter(w, unit, add)
 			parts[#parts + 1] = string.format("%s+%d(%d%%)=%d", Name(w), add, pct, Counter(w, unit))
 		end
 	end
 	if #parts > 0 then
 		IIS.turn_stats.registered = IIS.turn_stats.registered + 1
-		Log("IIS register %s by %s cost=%d/100 (%s of max %s AP): %s", tostring(action_id), Name(unit), ap100,
-			FormatAP(ap), FormatAP(mover_max), table.concat(parts, " "))
+		Log("IIS register %s by %s cost=%d 1.13 AP (%s AP): %s", tostring(action_id), Name(unit), ap113,
+			FormatAP(ap), table.concat(parts, " "))
 	end
 end
 

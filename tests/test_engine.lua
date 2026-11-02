@@ -291,6 +291,13 @@ t.case("MoverSkipReason refuses previews, other triggers, player units and the r
 	t.eq(Q.MoverSkipReason(mover, "move"), "disabled")
 end)
 
+t.case("WinSkipReason: the AP minimum does not depend on the watcher's max AP", function()
+	ResetWorld()
+	Q.Config.require_attack_ap = false
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, max_ap = 6000 }), "Classic"), "AP below minimum")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 500, max_ap = 24000 }), "IIS"), nil)
+end)
+
 t.case("WinSkipReason: AP minimum, attack cost and blocking statuses", function()
 	ResetWorld()
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 10000 }), "IIS"), nil)
@@ -395,6 +402,14 @@ t.case("IIS: the counter reaches the reaction time on the fifth step", function(
 	t.eq(rows[1].cum[6], 30)
 end)
 
+t.case("IIS: a step registers the same AP for a mover with more max AP", function()
+	local mover, a = IISSetup()
+	mover.max_ap = 24000
+	local idx, _, rows = Q.FindIISMoveTrigger(mover, Path(mover, 6), 1)
+	t.eq(idx, 6)
+	t.eq(rows[1].cum[6], 30) -- 6 per step
+end)
+
 t.case("IIS: AP registered before the move bring the interrupt forward", function()
 	local mover = IISSetup(10)
 	local idx = Q.FindIISMoveTrigger(mover, Path(mover, 6), 1)
@@ -442,11 +457,19 @@ t.case("RegisterAction adds the AP of a seen action", function()
 	local mover, a = IISSetup()
 	world.sees[a] = { [mover] = true }
 	Q.RegisterAction(mover, "Attack", 4000)
-	-- 4000 of 12000 = 33 on the 1.13 scale, 74% of it = 24
+	-- 4000 raw = 33 1.13 AP, 74% of it = 24
 	t.eq(Q.Counter(a, mover), 24)
 	local hidden = FakeUnit({ id = "hidden", team = enemy_team })
 	Q.RegisterAction(hidden, "Attack", 4000)
 	t.eq(Q.Counter(a, hidden), 0)
+end)
+
+t.case("RegisterAction adds the same AP for a mover with more max AP", function()
+	local mover, a = IISSetup()
+	mover.max_ap = 24000
+	world.sees[a] = { [mover] = true }
+	Q.RegisterAction(mover, "Attack", 4000)
+	t.eq(Q.Counter(a, mover), 24)
 end)
 
 ------------------------------------------------------------------------------------------------

@@ -2,8 +2,8 @@
 -- (paths relative to _reference/ja2_113/source at commit 81ecd82). The file makes no engine
 -- calls, so tools/test.sh runs it with a plain Lua interpreter.
 --
--- Soldier tables hold plain values that IIS.lua reads from JA3 units. AP values that go
--- into the IIS formulas are on the 1.13 scale, where a full turn is 100 AP (ToScale100).
+-- Soldier tables hold plain values that IIS.lua reads from JA3 units. AP costs that go into
+-- the IIS formulas are 1.13 AP (To113AP).
 
 IISRules = {}
 local R = IISRules
@@ -22,6 +22,9 @@ R.Defaults = {
 	getting_aid_pct = 20,      -- Weapons.h AIM_PENALTY_GETTINGAID
 }
 
+-- 12 vanilla AP. GBO 4 changes const.Scale.AP but not raw AP (ADR 0001).
+local raw_ap_for_100_113_ap = 12000
+
 -- C integer division truncates toward zero. JA3's Lua also truncates with "/" on integers;
 -- a plain Lua 5.4 returns a float, so the result goes through floor or ceil.
 local function idiv(a, b)
@@ -39,25 +42,19 @@ local function clamp(v, lo, hi)
 	return v
 end
 
--- Converts JA3 raw AP to the 1.13 scale, where max_raw (a full turn) is 100.
-function R.ToScale100(raw, max_raw)
-	if not max_raw or max_raw <= 0 then
-		return 0
-	end
-	return idiv(raw * 100 + idiv(max_raw, 2), max_raw)
+-- Converts JA3 raw AP to 1.13 AP at the same rate for every unit (ADR 0001).
+function R.To113AP(raw)
+	return idiv(raw * 100 + idiv(raw_ap_for_100_113_ap, 2), raw_ap_for_100_113_ap)
 end
 
 -- Smallest raw AP a watcher needs to get an interrupt. Classic: MIN_APS_TO_INTERRUPT, and at
--- least one step or stance change (TeamTurns.cpp:1613, :1741). IIS: 4 of 100 (Soldier Control.cpp:24849).
-function R.MinAP(system, max_raw, step_raw, cfg)
+-- least one step or stance change (TeamTurns.cpp:1613, :1741). IIS: 4 1.13 AP (Soldier Control.cpp:24849).
+function R.MinAP(system, step_raw, cfg)
 	cfg = cfg or R.Defaults
-	local pct = system == "Classic" and cfg.min_aps_to_interrupt or cfg.iis_min_ap
-	local min = idiv(max_raw * pct + 99, 100)
+	local ap113 = system == "Classic" and cfg.min_aps_to_interrupt or cfg.iis_min_ap
+	local min = idiv(raw_ap_for_100_113_ap * ap113 + 99, 100)
 	if system == "Classic" and step_raw and step_raw > min then
 		min = step_raw
-	end
-	if min < 1 then
-		min = 1
 	end
 	return min
 end
@@ -150,8 +147,8 @@ end
 
 -- (UINT8)(sAPCost * pct / 100.0f + 0.5f), Points.cpp:1041. JA3's "/" truncates integers, so
 -- this rounds in integers.
-function R.IISRegisteredAP(ap100, pct)
-	return idiv(ap100 * pct + 50, 100)
+function R.IISRegisteredAP(ap113, pct)
+	return idiv(ap113 * pct + 50, 100)
 end
 
 -- The reaction time of ResolvePendingInterrupt, Soldier Control.cpp:24868-24928.
