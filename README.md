@@ -6,7 +6,7 @@ A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the e
 
 ## Features
 
-- **IIS (1.13 default):** each merc counts the AP that a seen enemy spends. When the count reaches the merc's reaction time, the merc interrupts.
+- **IIS (1.13 default):** each merc registers part of the AP that a seen enemy spends. When the merc's counter reaches its reaction time, the merc interrupts.
 - **Classic:** when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins.
 - **Collective interrupts:** teammates near a winner can join the interrupt.
 - **Clear UI:** a banner shows who interrupted. The other mercs' portraits are locked, and End Turn becomes End Interrupt.
