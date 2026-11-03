@@ -515,6 +515,23 @@ t.case("AddTrigger stores the plan only for the check in the mover's own thread"
 	t.eq(Q.plans[mover] ~= nil, true)
 end)
 
+-- Issue #4. The counter starts at 10 and each seen step adds 6. A vanilla overwatch stops the
+-- mover on step 2, before the IIS trigger at step 4. CombatGoto then checks the rest of the path.
+t.case("IIS: a vanilla interrupt at an earlier step keeps the AP of the walked steps", function()
+	local mover, a = IISSetup(10)
+	mover.in_cmd = true
+	local dummies = Path(mover, 6)
+	local list = Q.AddTrigger(mover, "move", dummies, nil, nil, { { "overwatch" } }, 2)
+	t.eq(list[1][1], "overwatch")
+	mover.pos = dummies[2].pos
+	local rest = { table.unpack(dummies, 2) }
+	local _, idx = Q.AddTrigger(mover, "move", rest)
+	t.eq(idx, 3, "trigger index in the rest of the path") -- step 4: 16, 22, 28
+	mover.pos = dummies[6].pos
+	OnMsg.UnitMovementDone(mover)
+	t.eq(Q.Counter(a, mover), 40) -- 10 + 5 steps of 6
+end)
+
 t.case("The check wrapper returns nothing for a stopped mover", function()
 	local mover = IISSetup(10)
 	mover.command_thread = "thread"
