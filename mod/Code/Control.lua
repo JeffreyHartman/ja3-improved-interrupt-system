@@ -247,7 +247,6 @@ local function AddCollective(st_mercs, mover, n)
 				if ok then
 					st_mercs[#st_mercs + 1] = mate
 					joined[#joined + 1] = mate
-					IIS.ResetCounter(mate, mover)
 				end
 			end
 		end
@@ -290,27 +289,14 @@ function IIS.RunInterrupt(mover, info, dummy)
 	local n = IIS.interrupt_count
 
 	local joined = {}
-	if info.system == "IIS" then
-		SafeCall(nil, "IIS commit", function()
-			if info.kind == "move" then
-				IIS.CommitPlan(info.plan, info.step, "interrupt #" .. n)
-			end
-			for _, m in ipairs(mercs) do
-				IIS.ResetCounter(m, mover)
-			end
+	if info.system == "IIS" and cfg.collective then
+		SafeCall(nil, "collective", function()
+			joined = AddCollective(mercs, mover, n)
 		end)
-		if cfg.collective then
-			SafeCall(nil, "collective", function()
-				joined = AddCollective(mercs, mover, n)
-			end)
-		end
 	end
-	SafeCall(nil, "seen marks", function()
-		local mem = IIS.Memory()
-		for _, m in ipairs(mercs) do
-			IIS.Mark(mem.seen_turn, m, mover)
-			IIS.Mark(mem.seen_ever, m, mover)
-		end
+	SafeCall(nil, "IIS memory", function()
+		local here = info.kind == "move" and dummy and dummy.pos or nil
+		IIS.LogCommit(IISMemory.Fired(mover, mercs, here), "interrupt #" .. n, mover)
 	end)
 
 	local st = {

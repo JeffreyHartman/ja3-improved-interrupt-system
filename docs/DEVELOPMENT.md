@@ -5,7 +5,8 @@
 | File | What it does |
 |---|---|
 | `mod/Code/Rules.lua` | The 1.13 formulas. It makes no engine calls. |
-| `mod/Code/IIS.lua` | Settings, log, trigger checks, IIS counts and what each unit saw. `IIS.E` holds every engine read, so the tests can replace it. |
+| `mod/Code/Memory.lua` | The Watcher memory (counters, Seen this turn, Seen before) and the move plans. It makes no engine calls. |
+| `mod/Code/IIS.lua` | Settings, log and trigger checks. `IIS.E` holds every engine read, so the tests can replace it. |
 | `mod/Code/Control.lua` | Runs an interrupt and gives control to the interrupters. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
 
@@ -31,7 +32,8 @@ These overrides change behavior only while an interrupt is active:
 Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
 
 - `tests/test_rules.lua` checks the formulas against worked examples from the 1.13 source code.
-- `tests/test_engine.lua` loads `IIS.lua` and `Control.lua` with fake engine functions.
+- `tests/test_memory.lua` checks `IISMemory` with a plain store table.
+- `tests/test_engine.lua` loads `IIS.lua` and `Control.lua` with fake engine functions and the real `IISMemory`.
 
 The tests do not cover `UI.lua` or anything that needs the game.
 
@@ -51,7 +53,7 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 | `mods loaded` | The title, id and version of each loaded mod. |
 | `check #N ... TRIGGER` | A check found winners, with their points (Classic) or count and reaction time (IIS). |
 | `trigger in an AI planning check` | The AI ran the same check to group its units. Nothing happens. |
-| `IIS register`, `IIS commit` | A seen enemy action or move added AP to the mercs' counts. |
+| `IIS register`, `IIS commit` | A seen enemy action or move added AP to the mercs' counters. |
 | `enemy attack exec begin`, `enemy attack exec end` | An enemy firearm attack started or ended. A `begin` without an `end` means that the enemy's command stopped inside the attack. |
 | `after-attack check` | The check after an enemy attack, with its result or the reason that it did not run. |
 | `INT #N BEGIN`, `INT #N END` | The interrupt started or ended. `END` gives the reason and the AP of each interrupter. |
@@ -61,4 +63,4 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 | `INT #N STUCK?` | A merc stayed busy for more than 10 seconds. |
 | `INT #N ... failed` | A part of the interrupt failed with a Lua error. The interrupt continues without that part. |
 | `stops at`, `re-plans from its tile` | "Stop" mode: the enemy stays on its tile, gets back AP and plans its attacks again. |
-| `TurnEnded` | The check counts of the turn, the skip reasons and the IIS counts. |
+| `TurnEnded` | The check counts of the turn, the skip reasons and the IIS counters by session id (`a<-enemy=5`). |

@@ -5,11 +5,12 @@ return PlaceObj('ModDef', {
 	'author', "jeff",
 	'version_major', 0,
 	'version_minor', 7,
-	'version', 9,
+	'version', 10,
 	'lua_revision', 233360,
 	'saved_with_revision', 366685,
 	'code', {
 		"Code/Rules.lua",
+		"Code/Memory.lua",
 		"Code/IIS.lua",
 		"Code/Control.lua",
 		"Code/UI.lua",

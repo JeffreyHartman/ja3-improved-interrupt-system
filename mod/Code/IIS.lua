@@ -1,14 +1,15 @@
 -- Improved Interrupt System: player-controlled interrupts in the style of JA2 1.13.
--- This file holds the settings, the log, the trigger checks and the IIS counters.
--- Rules.lua has the 1.13 formulas, Control.lua runs an interrupt and UI.lua shows it.
+-- This file holds the settings, the log and the trigger checks. Rules.lua has the 1.13 formulas,
+-- Memory.lua has the Watcher memory, Control.lua runs an interrupt and UI.lua shows it.
 --
 -- A trigger is an entry { "iis", top_merc, info, dummy } that the wrapper of
 -- Unit:CheckProvokeOpportunityAttacks adds to the vanilla interrupt list. The game then calls
 -- Unit:ProvokeOpportunityAttacksFromList in the enemy's command thread, and the AI turn waits.
 
 IIS = IIS or {}
-IIS.version = "0.7.2"
+IIS.version = "0.7.3"
 local R = IISRules
+local Mem = IISMemory
 
 IIS.Config = {
 	enabled = true,
@@ -239,6 +240,10 @@ function E.TeamSees(team, unit)
 	return team and HasVisibilityTo(team, unit) and true or false
 end
 
+function E.SameTile(a, b)
+	return a and b and a:Equal2D(b) or false
+end
+
 function E.IsCurrentPos(mover, pos)
 	return pos and mover:GetPos():Equal2D(pos)
 end
@@ -256,55 +261,29 @@ function E.Rand(max)
 end
 
 ------------------------------------------------------------------------------------------------
--- What each unit saw. seen_turn decays at the start of the watcher's own turn, like SEEN_THIS_TURN
--- in 1.13 (TeamTurns.cpp:576). seen_ever is gbSeenOpponents. Keys are session ids.
+-- Watcher memory (Memory.lua). The game saves gv_IIS, keyed by session ids.
 
-GameVar("gv_IIS", function() return { seen_turn = {}, seen_ever = {} } end)
+GameVar("gv_IIS", function() return { counters = {}, seen_turn = {}, seen_ever = {} } end)
 
 -- The mod environment refuses new globals after loading, so a missing GameVar falls back to a
 -- table that is not saved.
-local fallback_memory = { seen_turn = {}, seen_ever = {} }
+local fallback_memory = {}
 
-local function Memory()
-	local mem = rawget(_G, "gv_IIS")
-	if type(mem) ~= "table" then
-		mem = fallback_memory
-	end
-	mem.seen_turn = mem.seen_turn or {}
-	mem.seen_ever = mem.seen_ever or {}
-	return mem
-end
-IIS.Memory = Memory
-
-local function Mark(tbl, a, b)
-	local ka, kb = E.Key(a), E.Key(b)
-	if not ka or not kb then return end
-	local row = tbl[ka]
-	if not row then
-		row = {}
-		tbl[ka] = row
-	end
-	row[kb] = true
-end
-IIS.Mark = Mark
-
-local function Saw(tbl, a, b)
-	local row = tbl[E.Key(a)]
-	return row and row[E.Key(b)] or false
-end
-IIS.Saw = Saw
+Mem.Setup{
+	key = function(u) return E.Key(u) end,
+	same_tile = function(a, b) return E.SameTile(a, b) end,
+	store = function()
+		local mem = rawget(_G, "gv_IIS")
+		return type(mem) == "table" and mem or fallback_memory
+	end,
+}
 
 function IIS.RecordVisibility()
-	local mem = Memory()
 	for _, u in ipairs(g_Units or empty_table) do
 		if IsValid(u) and not u:IsDead() and u.team then
-			local player = E.CanControlTeam(u)
 			for _, other in ipairs(g_Visibility and g_Visibility[u] or empty_table) do
 				if IsKindOf(other, "Unit") and u:IsOnEnemySide(other) and HasVisibilityTo(u, other) then
-					Mark(mem.seen_ever, u, other)
-					if player then
-						Mark(mem.seen_turn, u, other)
-					end
+					Mem.Sees(u, other)
 				end
 			end
 		end
@@ -318,41 +297,20 @@ function OnMsg.CombatComputedVisibility()
 	end
 end
 
-------------------------------------------------------------------------------------------------
--- IIS counters: counters[watcher][mover] holds the registered AP (ubInterruptCounter).
--- A watcher's counters reset at the start of its own turn and when its interrupt fires.
-
-IIS.counters = IIS.counters or {}
-IIS.plans = IIS.plans or {}
-
-local function Counter(w, m)
-	local row = IIS.counters[w]
-	return row and row[m] or 0
-end
-IIS.Counter = Counter
-
-local function AddCounter(w, m, n)
-	if n == 0 then return end
-	local row = IIS.counters[w]
-	if not row then
-		row = {}
-		IIS.counters[w] = row
+-- Writes the log line for a commit result of Memory.lua.
+function IIS.LogCommit(result, why, mover)
+	if not result then return end
+	if result.off_path then
+		Log("IIS plan of %s (%s): the tile %s is not on the planned path. Steps after %d not counted.", Name(mover), why,
+			Pos(mover), result.done)
+		return
 	end
-	row[m] = math.min(255, math.max(0, (row[m] or 0) + n)) -- UINT8 in 1.13
-end
-IIS.AddCounter = AddCounter
-
-local function ResetCounter(w, m)
-	local row = IIS.counters[w]
-	if row then
-		row[m] = nil
+	local parts = {}
+	for i, add in ipairs(result.adds) do
+		parts[i] = string.format("%s+%d=%d", Name(add.unit), add.delta, add.counter)
 	end
-end
-IIS.ResetCounter = ResetCounter
-
-function IIS.ResetCountersOf(units)
-	for _, u in ipairs(units or {}) do
-		IIS.counters[u] = nil
+	if #parts > 0 then
+		Log("IIS commit (%s) mover=%s steps through %d: %s", why, Name(mover), result.through, table.concat(parts, " "))
 	end
 end
 
@@ -481,7 +439,6 @@ end
 
 -- Classic: each watcher that did not see the mover this turn duels at its first step with line of sight.
 function IIS.FindClassicMoveTrigger(mover, dummies, n)
-	local mem = Memory()
 	local stats = IIS.turn_stats
 	local first = FirstStep(mover, dummies)
 	local running = IsRunning(mover, dummies, first)
@@ -489,7 +446,7 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 	local start_target = { pos = mover:GetPos(), stance = mover.stance }
 	for _, w in ipairs(E.PlayerUnits()) do
 		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, "Classic")
-		if not skip and (E.SeesNow(w, mover) or Saw(mem.seen_turn, w, mover)) then
+		if not skip and (E.SeesNow(w, mover) or Mem.SeenThisTurn(w, mover)) then
 			skip = "saw mover this turn"
 		end
 		if not skip and E.WatcherSeesStep(w, mover, start_target) then
@@ -514,12 +471,12 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 				local _, m_dark = E.Sight(mover, w)
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = true, saw_before = Saw(mem.seen_ever, w, mover) }),
-					{ passive = true, distance = d, max_visible = max_visible, dark = w_dark, other_saw_me = Saw(mem.seen_ever, mover, w) })
+					IIS.ClassicSoldier(w, { is_player = true, saw_before = Mem.SeenBefore(w, mover) }),
+					{ passive = true, distance = d, max_visible = max_visible, dark = w_dark, other_saw_me = Mem.SeenBefore(mover, w) })
 				local mp = R.ClassicPoints(
 					IIS.ClassicSoldier(mover, { stance = dummy.stance or mover.stance, running = running,
-						saw_before = Saw(mem.seen_ever, mover, w), team_knows = E.TeamSees(mover.team, w) }),
-					{ passive = false, distance = d, max_visible = max_visible, dark = m_dark, other_saw_me = Saw(mem.seen_ever, w, mover) })
+						saw_before = Mem.SeenBefore(mover, w), team_knows = E.TeamSees(mover.team, w) }),
+					{ passive = false, distance = d, max_visible = max_visible, dark = m_dark, other_saw_me = Mem.SeenBefore(w, mover) })
 				local m_sees_w = E.MoverSeesWatcher(mover, dummy, w)
 				row.won, row.margin, row.how = R.ClassicDuel(wp, mp, true, m_sees_w)
 				row.detail = string.format("step %d dist %d: %d vs %d%s -> %s (%s)", row.first_los, d, wp, mp,
@@ -549,7 +506,7 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 			Verbose("  check #%d watcher %s skipped: %s", n, Name(w), skip)
 		else
 			local win_skip = IIS.WinSkipReason(w, "IIS")
-			local row = { unit = w, counter = Counter(w, mover), los = {}, adds = {}, win_skip = win_skip }
+			local row = { unit = w, counter = Mem.Counter(w, mover), los = {}, adds = {}, win_skip = win_skip }
 			row.rt = win_skip and math.huge or R.IISReactionTime(IIS.IISWatcher(w), rc)
 			for i = first, #dummies do
 				local dummy = dummies[i]
@@ -573,31 +530,15 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 			row.cum[#dummies] or 0, steps, row.win_skip and "-" or tostring(row.rt), row.win_skip and (" (cannot win: " .. row.win_skip .. ")") or "")
 		Verbose("  check #%d watcher %s: %s", n, Name(row.unit), row.detail)
 	end
-	-- CombatGoto removes passed steps from its dummy list, so the plan keeps a copy.
-	local steps = {}
+	-- CombatGoto removes passed steps from its dummy list, so the plan keeps their positions.
+	local plan = { steps = {}, first = first, rows = {} }
 	for i, d in ipairs(dummies) do
-		steps[i] = d
+		plan.steps[i] = d.pos
 	end
-	local plan = { mover = mover, dummies = steps, first = first, rows = rows, done = first - 1 }
+	for i, row in ipairs(rows) do
+		plan.rows[i] = { unit = row.unit, cum = row.cum }
+	end
 	return idx, winners, rows, plan
-end
-
--- Adds the registered AP of steps first..upto of a plan to the counters. A plan commits each
--- step once, so the interrupt and the end of the move can both call it.
-function IIS.CommitPlan(plan, upto, why)
-	if not plan or upto <= plan.done then return end
-	local parts = {}
-	for _, row in ipairs(plan.rows) do
-		local delta = (row.cum[upto] or 0) - (row.cum[plan.done] or 0)
-		if delta > 0 then
-			AddCounter(row.unit, plan.mover, delta)
-			parts[#parts + 1] = string.format("%s+%d=%d", Name(row.unit), delta, Counter(row.unit, plan.mover))
-		end
-	end
-	plan.done = upto
-	if #parts > 0 then
-		Log("IIS commit (%s) mover=%s steps through %d: %s", why, Name(plan.mover), upto, table.concat(parts, " "))
-	end
 end
 
 -- Classic after an attack: a target that did not see the attacker duels it (NoticeUnseenAttacker,
@@ -608,7 +549,6 @@ function IIS.FindAttackTrigger(mover, n)
 	local stats = IIS.turn_stats
 	local targets = IIS.attack_targets[mover] or {}
 	local rows = {}
-	local mem = Memory()
 	for _, w in ipairs(E.PlayerUnits()) do
 		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, system)
 		local targeted = targets[w] or false
@@ -625,11 +565,11 @@ function IIS.FindAttackTrigger(mover, n)
 				local d = E.DistTiles(w, mover:GetPos())
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = true, saw_before = Saw(mem.seen_ever, w, mover) }),
+					IIS.ClassicSoldier(w, { is_player = true, saw_before = Mem.SeenBefore(w, mover) }),
 					{ passive = true, distance = d, max_visible = max_visible, other_saw_me = true })
 				local mp = R.ClassicPoints(
 					IIS.ClassicSoldier(mover, { saw_before = true, team_knows = true }),
-					{ passive = false, distance = d, max_visible = max_visible, other_saw_me = Saw(mem.seen_ever, w, mover) })
+					{ passive = false, distance = d, max_visible = max_visible, other_saw_me = Mem.SeenBefore(w, mover) })
 				local won, margin, how = R.ClassicDuel(wp, mp, true, true)
 				local row = { unit = w, won = won, margin = margin, how = how,
 					detail = string.format("unseen attacker, dist %d: %d vs %d -> %s", d, wp, mp, won and "WIN" or "lose") }
@@ -638,7 +578,7 @@ function IIS.FindAttackTrigger(mover, n)
 			end
 		else
 			stats.checked = stats.checked + 1
-			local row = { unit = w, counter = Counter(w, mover), sees = E.SeesNow(w, mover) or targeted }
+			local row = { unit = w, counter = Mem.Counter(w, mover), sees = E.SeesNow(w, mover) or targeted }
 			row.rt = R.IISReactionTime(IIS.IISWatcher(w), IIS.RulesConfig())
 			row.detail = string.format("counter %d, reaction time %d, %s", row.counter, row.rt,
 				row.sees and (targeted and "attacked" or "sees attacker") or "does not see attacker")
@@ -697,9 +637,14 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 		if system == "Classic" then
 			idx, winners, rows = IIS.FindClassicMoveTrigger(mover, dummies, n)
 		else
+			-- After a vanilla interrupt earlier on the path, CombatGoto checks the rest of the path.
+			-- The old plan commits the steps that the mover walked, so this check reads them.
+			if real then
+				IIS.LogCommit(Mem.PlanMove(mover, nil, mover:GetPos()), "next check", mover)
+			end
 			idx, winners, rows, plan = IIS.FindIISMoveTrigger(mover, dummies, n)
 			if real then
-				IIS.plans[mover] = plan
+				Mem.PlanMove(mover, plan)
 			end
 		end
 	else
@@ -722,7 +667,7 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 		and string.format("step %d/%d pos=%s", idx, #dummies, tostring(dummies[idx].pos))
 		or "after its attack"
 	local info = { kind = trigger_type == "move" and "move" or "attack", system = system, mercs = mercs,
-		winners = winners, rows = rows, plan = plan, step = idx, check = n, where = where }
+		winners = winners, rows = rows, step = idx, check = n, where = where }
 	local entry = { "iis", mercs[1], info, dummies[idx] }
 
 	if interrupts and provoke_idx < idx then
@@ -797,8 +742,7 @@ function IIS.RegisterAction(unit, action_id, ap)
 		if not IIS.ObserverSkipReason(w, unit) and E.SeesNow(w, unit) then
 			local pct = IIS.RegisteredPercent(w, unit, unit:GetPos())
 			local add = R.IISRegisteredAP(ap113, pct)
-			AddCounter(w, unit, add)
-			parts[#parts + 1] = string.format("%s+%d(%d%%)=%d", Name(w), add, pct, Counter(w, unit))
+			parts[#parts + 1] = string.format("%s+%d(%d%%)=%d", Name(w), add, pct, Mem.Register(w, unit, add))
 		end
 	end
 	if #parts > 0 then
@@ -895,32 +839,12 @@ function IIS.LogLoadedMods()
 	Log("mods loaded: %s", #parts > 0 and table.concat(parts, "; ") or "(none)")
 end
 
--- Finds the last step of a plan that the mover reached.
-local function ReachedStep(plan, unit)
-	local pos = unit:GetPos()
-	for i = #plan.dummies, plan.first, -1 do
-		local d = plan.dummies[i]
-		if d.pos and pos:Equal2D(d.pos) then
-			return i
-		end
-	end
-end
-
 function OnMsg.UnitMovementDone(unit)
-	local plan = IIS.plans[unit]
-	if plan then
-		IIS.plans[unit] = nil
-		local ok, err = pcall(function()
-			local reached = ReachedStep(plan, unit)
-			if reached then
-				IIS.CommitPlan(plan, reached, "move done")
-			else
-				Log("IIS plan of %s: the end tile %s is not on the planned path. Steps after %d not counted.", Name(unit), Pos(unit), plan.done)
-			end
-		end)
-		if not ok then
-			Log("CommitPlan failed: %s", tostring(err))
-		end
+	local ok, err = pcall(function()
+		IIS.LogCommit(Mem.MoveDone(unit, unit:GetPos()), "move done", unit)
+	end)
+	if not ok then
+		Log("move commit failed: %s", tostring(err))
 	end
 	if unit.iis_stopped then
 		IIS.OnStoppedMoverDone(unit)
@@ -935,12 +859,8 @@ function IIS.HookStatus()
 end
 
 local function ResetCombatState(why)
-	IIS.counters = {}
-	IIS.plans = {}
+	Mem.Clear()
 	IIS.attack_targets = {}
-	local mem = Memory()
-	mem.seen_turn = {}
-	mem.seen_ever = {}
 	Log("combat state reset (%s)", why)
 end
 
@@ -955,24 +875,15 @@ function OnMsg.CombatEnd()
 end
 
 function OnMsg.LoadGame()
-	IIS.counters = {}
-	IIS.plans = {}
+	Mem.Loaded()
 	Log("LoadGame in_combat=%s system=%s %s", tostring(not not g_Combat), IIS.Config.system, IIS.HookStatus())
 end
 
 function OnMsg.TurnStart(team_idx)
 	IIS.ResetTurnStats()
 	local team = g_Teams and g_Teams[team_idx]
-	if team and team.control == "UI" then
-		-- A soldier's IIS counters and SEEN_THIS_TURN marks decay at the start of its own turn.
-		IIS.ResetCountersOf(team.units)
-		local mem = Memory()
-		for _, u in ipairs(team.units or empty_table) do
-			local k = E.Key(u)
-			if k then
-				mem.seen_turn[k] = nil
-			end
-		end
+	if team then
+		Mem.TurnStart(team.units)
 	end
 	Log("TurnStart team=%s side=%s control=%s system=%s %s", tostring(team_idx), tostring(team and team.side),
 		tostring(team and team.control), IIS.Config.system, IIS.HookStatus())
@@ -1003,12 +914,9 @@ function OnMsg.TurnEnded(team_idx)
 		end
 		Log("  actions per living unit: %s", #parts > 0 and table.concat(parts, ", ") or "(none)")
 		local rows = {}
-		for w, row in pairs(IIS.counters) do
-			for m, c in pairs(row) do
-				rows[#rows + 1] = string.format("%s<-%s=%d", Name(w), Name(m), c)
-			end
+		for i, c in ipairs(Mem.Counters()) do
+			rows[i] = string.format("%s<-%s=%d", tostring(c.watcher), tostring(c.mover), c.counter)
 		end
-		table.sort(rows)
 		Log("  IIS counters at turn end: %s", #rows > 0 and table.concat(rows, " ") or "(none)")
 	end
 end
