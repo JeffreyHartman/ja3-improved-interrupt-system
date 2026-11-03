@@ -234,7 +234,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 		return
 	end
 	if IIS.active then
-		Log("interrupt skipped: INT #%d is still active", IIS.active.n)
+		Log("interrupt skipped: INT #%d is still active", IIS.active:Number())
 		return
 	end
 	if not IsValid(mover) or mover:IsDead() then

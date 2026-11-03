@@ -835,6 +835,17 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	t.eq(enemy.iis_stopped, nil)
 end)
 
+t.case("RunInterrupt skips a new interrupt while another one is active", function()
+	ResetWorld()
+	CanYield = function() return true end
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
+	Q.RunInterrupt(enemy, { mercs = { FakeUnit({ id = "b" }) } })
+	CanYield = nil
+	t.eq(LogHas("interrupt skipped: INT #1 is still active"), true)
+	t.eq(Q.active, it)
+end)
+
 t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	ResetWorld()
 	local query = {}
