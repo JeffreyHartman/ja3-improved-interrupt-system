@@ -39,6 +39,24 @@ _Avoid_: merc (as a role)
 **Merc**:
 A player unit. The word says nothing about the unit's role in an interrupt.
 
+### Interrupt
+
+**Interrupt**:
+A pause in a mover's action in which the interrupters act. The mover's action continues when the interrupt ends.
+_Avoid_: interrupt turn
+
+**End request**:
+The first End Turn press in an interrupt. The interrupt ends when no interrupter is busy.
+_Avoid_: end_requested, player end
+
+**Forced end**:
+A second End Turn press while an interrupter is busy. The busy interrupters stop their actions, and the interrupt ends at once.
+_Avoid_: force_end
+
+**Auto end**:
+The end of an interrupt when no interrupter has the AP for one step and no interrupter acted for a short time.
+_Avoid_: out of AP end
+
 ### IIS counting
 
 **Registered AP**:
