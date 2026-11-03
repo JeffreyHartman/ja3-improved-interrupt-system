@@ -264,6 +264,38 @@ t.case("Interrupt: a blocked simultaneous action lets the scan continue", functi
 	t.eq(it:TakeNext(Yes).action_id, "Move")
 end)
 
+-- The CanStartAction rule as TryRunQueue applies it, with `running` in place of
+-- CombatActions_RunningState.
+local function CanStartUnder(running, it, asked)
+	return function(e)
+		asked[#asked + 1] = e.action_id
+		local states = {}
+		for _, m in ipairs(it:Interrupters()) do
+			if m ~= e.unit and running[m] then
+				states[#states + 1] = running[m]
+			end
+		end
+		return not running[e.unit] and IISRules.CanStartAction(e.simultaneous, states)
+	end
+end
+
+t.case("Interrupt: after an action starts, TakeNext checks an earlier blocked simultaneous action again and starts nothing", function()
+	local a, b, c = Unit("a"), Unit("b"), Unit("c")
+	local it = Fresh{ winners = { a, b, c } }
+	local running = { [a] = "PostAction" }
+	it:Enqueue(Entry("MoveA", a, { simultaneous = true }))
+	it:Enqueue(Entry("MoveB", b, { simultaneous = true }))
+	it:Enqueue(Entry("Reload", c))
+	local asked = {}
+	t.eq(it:TakeNext(CanStartUnder(running, it, asked)).action_id, "MoveB")
+	t.eq(table.concat(asked, " "), "MoveA MoveB")
+	running[b] = "start"
+	asked = {}
+	t.eq(it:TakeNext(CanStartUnder(running, it, asked)), nil)
+	t.eq(table.concat(asked, " "), "MoveA Reload")
+	t.eq(Ids(it:Drain()), "MoveA Reload")
+end)
+
 t.case("Interrupt: TakeNext drops the action of a dead unit and reports it to on_drop", function()
 	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
 	it:Enqueue(Entry("Attack", w[1]))
