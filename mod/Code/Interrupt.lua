@@ -46,6 +46,26 @@ function M.Begin(o)
 	return it
 end
 
+--- The interrupt number for the log.
+function Interrupt:Number()
+	return self.n
+end
+
+--- The unit whose action the interrupt pauses.
+function Interrupt:Mover()
+	return self.mover
+end
+
+--- The interrupt system that started the interrupt: "IIS" or "Classic".
+function Interrupt:System()
+	return self.system
+end
+
+--- The trigger kind: "move" or "attack".
+function Interrupt:Kind()
+	return self.kind
+end
+
 --- True when `u` is a winner or a joiner.
 function Interrupt:IsInterrupter(u)
 	return u ~= nil and self.is_interrupter[u] or false

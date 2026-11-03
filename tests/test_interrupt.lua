@@ -307,3 +307,11 @@ t.case("Interrupt: Top is the first winner, even when it is down", function()
 	a.down = true
 	t.eq(it:Top(), a)
 end)
+
+t.case("Interrupt: Number, Mover, System and Kind return the values from Begin", function()
+	local it, mover = Fresh()
+	t.eq(it:Number(), 1)
+	t.eq(it:Mover(), mover)
+	t.eq(it:System(), "IIS")
+	t.eq(it:Kind(), "move")
+end)
