@@ -27,7 +27,7 @@ dofile("mod/Code/UI.lua")
 
 local function EndText(code)
 	combat_log = {}
-	IIS.UI.End({ n = 1 }, code)
+	IIS.UI.End(IISInterrupt.Begin{ n = 1, mover = {}, winners = {}, system = "IIS", kind = "move", cfg = IIS.Config }, code)
 	return combat_log[1]
 end
 

@@ -272,6 +272,14 @@ local function Steps(...)
 	return row
 end
 
+-- Starts an interrupt with Q.Activate, as RunInterrupt does, without the engine calls around it.
+local function ActiveState(winners, mover, joiners)
+	local it = IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, joiners = joiners or {}, system = "IIS",
+		kind = "move", cfg = Q.Config }
+	Q.Activate(it)
+	return it
+end
+
 ------------------------------------------------------------------------------------------------
 -- Mover and watcher filters
 
@@ -563,7 +571,7 @@ end)
 t.case("After an attack: the log names the skip reason, or each watcher when nobody wins", function()
 	local mover, a = IISSetup()
 	world.sees[a] = { [mover] = true }
-	Q.active = { n = 9 }
+	ActiveState({ FakeUnit({ id = "b" }) }, FakeUnit({ id = "other", team = enemy_team }))
 	Q.AddTrigger(mover, "attack reaction", { mover })
 	t.eq(LogHas("after%-attack check by enemy.* skipped: interrupt active"), true)
 	Q.active = false
@@ -589,14 +597,6 @@ end)
 
 ------------------------------------------------------------------------------------------------
 -- Control overrides
-
-local function ActiveState(winners, mover, joiners)
-	local st = { n = 1, mover = mover, forced = {}, start_ap = {} }
-	st.it = IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, joiners = joiners or {}, system = "IIS",
-		kind = "move", cfg = Q.Config }
-	Q.active = st
-	return st
-end
 
 t.case("CanBeControlled: interrupters yes, other player units no, enemies vanilla", function()
 	ResetWorld()
@@ -632,12 +632,12 @@ end
 t.case("Tick selects the next interrupter that can act when the selected one goes down", function()
 	ResetWorld()
 	local a, b, c = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "c" })
-	local st = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
 	FakeSelection(a)
-	Q.Tick(st, 100)
+	Q.Tick(it, 100)
 	t.eq(SelectedObj, a)
 	a.down, b.down = true, true
-	Q.Tick(st, 200)
+	Q.Tick(it, 200)
 	t.eq(SelectedObj, c)
 	t.eq(LogHas("INT #1 a#a is down, selecting c#c"), true)
 end)
@@ -688,24 +688,24 @@ t.case("StartCombatAction queues behind another interrupter and starts after it"
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local st = ActiveState({ a, b }, enemy)
+	local it = ActiveState({ a, b }, enemy)
 	CombatActions_RunningState[a] = "start"
 	StartCombatAction("Move", b, 2000)
 	t.eq(#ran_actions, 0)
-	t.eq(st.it:QueueLength(), 1)
+	t.eq(it:QueueLength(), 1)
 	t.eq(LogHas("queued Move: 1 waiting"), true)
 	CombatActions_RunningState[a] = "PostAction"
 	OnMsg.CombatPostAction(a)
 	RunThreads()
 	t.eq(#ran_actions, 1) -- Move plays alongside a PostAction
-	t.eq(st.it:QueueLength(), 0)
+	t.eq(it:QueueLength(), 0)
 end)
 
 t.case("StartCombatAction drops the queued action of a unit that died", function()
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local st = ActiveState({ a, b }, enemy)
+	local it = ActiveState({ a, b }, enemy)
 	CombatActions_RunningState[a] = "start"
 	StartCombatAction("Attack", b, 2000)
 	b.dead = true
@@ -713,7 +713,7 @@ t.case("StartCombatAction drops the queued action of a unit that died", function
 	OnMsg.CombatPostAction(a)
 	RunThreads()
 	t.eq(#ran_actions, 0)
-	t.eq(st.it:QueueLength(), 0)
+	t.eq(it:QueueLength(), 0)
 	t.eq(LogHas("INT #1 dropped queued Attack: the unit is gone"), true)
 end)
 
@@ -721,15 +721,14 @@ t.case("EndInterrupt refunds the AP of queued actions that never started", funct
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b", ap = 10000 })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local st = ActiveState({ a, b }, enemy)
-	st.start_time = 0
+	local it = ActiveState({ a, b }, enemy)
 	CombatActions_RunningState[a] = "start"
 	StartCombatAction("Attack", b, 3000)
 	t.eq(b.ActionPoints, 7000)
 	Q.UI = { End = function() end }
-	Q.EndInterrupt(st, "test")
+	Q.EndInterrupt(it, "test")
 	t.eq(b.ActionPoints, 10000)
-	t.eq(st.it:QueueLength(), 0)
+	t.eq(it:QueueLength(), 0)
 	t.eq(LogHas("INT #1 dropped queued action Attack of " .. Q.Name(b) .. ", refunded 3000 raw AP"), true)
 end)
 
@@ -756,18 +755,18 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	ResetWorld()
 	local a = FakeUnit({ id = "a", command = "FirearmAttack" })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local st = ActiveState({ a }, enemy)
+	local it = ActiveState({ a }, enemy)
 	local refreshed = 0
 	Q.UI = { Refresh = function() refreshed = refreshed + 1 end }
 	NetSyncEvents.EndTurn(netUniqueId)
 	t.eq(LogHas("end requested %(End Turn%)%. busy=true"), true)
 	t.eq(refreshed, 1)
-	t.eq(st.it:EndReason(), nil)
+	t.eq(it:EndReason(), nil)
 	t.eq(a.command, "FirearmAttack")
 	NetSyncEvents.EndTurn(netUniqueId)
 	t.eq(LogHas("STUCK%? End Turn pressed again while a merc is busy"), true)
 	t.eq(a.command, "Idle")
-	t.eq(st.it:EndReason(), "forced_end")
+	t.eq(it:EndReason(), "forced_end")
 	Q.active = false
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
@@ -777,17 +776,35 @@ t.case("An error in the end check ends the interrupt with end_check_error", func
 	local a = FakeUnit({ id = "a" })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
 	function enemy:IsDead() error("boom") end
-	local st = ActiveState({ a }, enemy)
-	st.start_time = 0
+	local it = ActiveState({ a }, enemy)
 	local ui_reason
 	Q.UI = { End = function(_, reason) ui_reason = reason end }
-	local reason = Q.CheckEnd(st)
+	local reason = Q.CheckEnd(it)
 	t.eq(reason, "end_check_error")
 	t.eq(LogHas("EndReason failed: .*boom"), true)
-	Q.EndInterrupt(st, reason)
+	Q.EndInterrupt(it, reason)
 	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
 	t.eq(ui_reason, "end_check_error")
 	t.eq(Q.active, false)
+end)
+
+t.case("The END log line shows the Forced counts and the AP of each interrupter at the start and at the end", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 10000 })
+	local b = FakeUnit({ id = "b", ap = 8500 })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	game_time = 1000
+	local it = ActiveState({ a }, enemy, { b })
+	Unit.CanBeControlled(a)
+	Unit.CanBeControlled(b)
+	IsNetPlayerTurn()
+	StartCombatAction("Attack", a, 4000)
+	Q.UI = { End = function() end }
+	game_time = 3500
+	Q.EndInterrupt(it, "end_request")
+	game_time = 0
+	t.eq(LogHas("INT #1 END %(end_request%): 2500ms game time, actions=1, ap: a#a 10%->6, b#b 8%.5%->8%.5, "
+		.. "forced: CanBeControlled=2 IsNetPlayerTurn=1$"), true)
 end)
 
 t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of the path", function()
@@ -798,9 +815,8 @@ t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of 
 	enemy.combat_path = { "dest", "mid", here }
 	enemy.combat_path_obj = { GetAP = function(_, p) return p == "dest" and 6000 or 3000 end }
 	enemy.start_move_free_ap = 0
-	local st = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	st.dummy = { pos = here }
-	Q.StopMover(st)
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
+	Q.StopMover(it, { pos = here })
 	t.eq(#enemy.combat_path, 1)
 	t.eq(enemy.combat_path[1], here)
 	t.eq(enemy.ActionPoints, 5000)
@@ -813,9 +829,8 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team, command = "FirearmAttack" })
 	enemy.in_cmd = true
 	enemy.combat_path = { "dest" }
-	local st = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	st.dummy = { pos = { x = 1, y = 0 } }
-	Q.StopMover(st)
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
+	Q.StopMover(it, { pos = { x = 1, y = 0 } })
 	t.eq(enemy.combat_path[1], "dest")
 	t.eq(enemy.iis_stopped, nil)
 end)
