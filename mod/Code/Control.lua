@@ -322,7 +322,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 					aps[#aps + 1] = string.format("%s=%s%s", Name(m), AP(m), MercBusy(m) and "(busy)" or "")
 				end
 				local line = string.format("%s queue=%d end_requested=%s | %s | %s", table.concat(aps, " "), it:QueueLength(),
-					tostring(it:EndRequested()), UIState(it), RunningStateSnapshot())
+					tostring(it:HasEndRequest()), UIState(it), RunningStateSnapshot())
 				if line ~= sh.wait_line or elapsed - sh.wait_logged >= cfg.heartbeat_repeat_ms then
 					sh.wait_line, sh.wait_logged = line, elapsed
 					Log("INT #%d waiting +%ss: %s", n, tostring(elapsed / 1000), line)

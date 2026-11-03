@@ -33,8 +33,8 @@ function M.Begin(o)
 		queue = {},
 		actions = 0,
 		last_activity = now(),
-		end_requested = false,
-		force_end = false,
+		end_request = false,
+		forced_end = false,
 		busy_ms = 0,
 	}, Interrupt)
 	for _, list in ipairs{ o.winners, o.joiners or {} } do
@@ -210,19 +210,19 @@ end
 -- Returns "requested" for the End request, "forced" for a Forced end, or nil when the press
 -- changes nothing.
 function Interrupt:EndTurnPressed()
-	if not self.end_requested then
-		self.end_requested = true
+	if not self.end_request then
+		self.end_request = true
 		return "requested"
 	end
-	if not self.force_end and self:Busy() then
-		self.force_end = true
+	if not self.forced_end and self:Busy() then
+		self.forced_end = true
 		return "forced"
 	end
 end
 
 --- True after the End request.
-function Interrupt:EndRequested()
-	return self.end_requested
+function Interrupt:HasEndRequest()
+	return self.end_request
 end
 
 --- The end reason code when the interrupt ends now, or nil while it goes on.
@@ -233,9 +233,9 @@ function Interrupt:EndReason()
 	if not in_combat() then return "combat_ended" end
 	if not alive(self.mover) then return "mover_dead" end
 	if #self:Living() == 0 then return "interrupters_down" end
-	if self.force_end then return "forced_end" end
+	if self.forced_end then return "forced_end" end
 	local is_busy = self:Busy()
-	if self.end_requested and not is_busy then return "end_request" end
+	if self.end_request and not is_busy then return "end_request" end
 	if cfg.auto_end and self.actions > 0 and not is_busy and self:OutOfAP()
 		and now() - self.last_activity >= cfg.auto_end_delay_ms then
 		return "auto_end"
