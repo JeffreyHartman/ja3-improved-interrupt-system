@@ -196,3 +196,32 @@ t.case("Interrupt: a down interrupter is not busy", function()
 	w[1].busy, w[1].down = true, true
 	t.eq(it:Busy(), false)
 end)
+
+t.case("Interrupt: IsInterrupter is true for the winners and the joiners only", function()
+	local a, b = Unit("a"), Unit("b")
+	local it, mover = Fresh{ winners = { a }, joiners = { b } }
+	t.eq(it:IsInterrupter(a), true)
+	t.eq(it:IsInterrupter(b), true)
+	t.eq(it:IsInterrupter(mover), false)
+	t.eq(it:IsInterrupter(Unit("c")), false)
+	t.eq(it:IsInterrupter(nil), false)
+end)
+
+t.case("Interrupt: CanAct is true for an interrupter that is not down", function()
+	local a, b = Unit("a"), Unit("b")
+	local it, mover = Fresh{ winners = { a }, joiners = { b } }
+	t.eq(it:CanAct(a), true)
+	t.eq(it:CanAct(b), true)
+	b.down = true
+	t.eq(it:CanAct(b), false)
+	t.eq(it:CanAct(mover), false)
+	t.eq(it:CanAct(nil), false)
+end)
+
+t.case("Interrupt: Top is the first winner, even when it is down", function()
+	local a, b, c = Unit("a"), Unit("b"), Unit("c")
+	local it = Fresh{ winners = { a, b }, joiners = { c } }
+	t.eq(it:Top(), a)
+	a.down = true
+	t.eq(it:Top(), a)
+end)
