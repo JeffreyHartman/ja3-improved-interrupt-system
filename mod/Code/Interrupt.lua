@@ -1,5 +1,5 @@
 -- IISInterrupt holds the state of the active interrupt and decides when it ends (GLOSSARY.md). The
--- file makes no engine calls, so tests/run.lua runs it with a plain Lua interpreter.
+-- file makes no engine calls, so tools/test.sh runs it with a plain Lua interpreter.
 
 IISInterrupt = {}
 local M = IISInterrupt
@@ -228,6 +228,7 @@ end
 --- The end reason code when the interrupt ends now, or nil while it goes on.
 -- The codes are "combat_ended", "mover_dead", "interrupters_down", "forced_end", "end_request"
 -- and "auto_end". UI.lua maps each code to the combat log text.
+-- Control.lua also passes "end_check_error" and "mover_command_ended" to the UI.
 function Interrupt:EndReason()
 	local cfg = self.cfg
 	if not in_combat() then return "combat_ended" end
