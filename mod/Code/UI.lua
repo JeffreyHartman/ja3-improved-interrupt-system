@@ -239,6 +239,18 @@ function UI.Refresh(st)
 	safe(st, "UI portraits", UI.RefreshPortraits)
 end
 
+-- The combat log text for each end reason code from IISInterrupt:EndReason and Control.lua.
+local end_reason_text = {
+	combat_ended = "combat ended",
+	mover_dead = "enemy dead",
+	interrupters_down = "all interrupters are down",
+	forced_end = "forced: End Turn pressed again while a merc was busy",
+	end_request = "player ended the interrupt",
+	auto_end = "interrupters are out of AP (auto end)",
+	end_check_error = "error in EndReason",
+	mover_command_ended = "enemy command ended (destructor)",
+}
+
 function UI.End(st, reason)
 	local safe = IIS.SafeCall
 	safe(st, "UI banner", UI.HideBanner)
@@ -246,7 +258,8 @@ function UI.End(st, reason)
 	safe(st, "UI portraits", UI.RefreshPortraits)
 	safe(st, "UI sound", PlayFX, "PlayerCombatTurnEnd", "start")
 	safe(st, "UI combat log", function()
-		CombatLog("important", T{Untranslated("Interrupt over (<reason>). The enemy turn continues."), reason = reason})
+		CombatLog("important", T{Untranslated("Interrupt over (<reason>). The enemy turn continues."),
+			reason = end_reason_text[reason] or reason})
 	end)
 	Log("INT #%d UI cleared", st.n)
 end

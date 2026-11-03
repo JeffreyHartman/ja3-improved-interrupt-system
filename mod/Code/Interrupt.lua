@@ -147,17 +147,19 @@ function Interrupt:EndRequested()
 	return self.end_requested
 end
 
---- The reason that the interrupt ends now, or nil while it goes on.
+--- The end reason code when the interrupt ends now, or nil while it goes on.
+-- The codes are "combat_ended", "mover_dead", "interrupters_down", "forced_end", "end_request"
+-- and "auto_end". UI.lua maps each code to the combat log text.
 function Interrupt:EndReason()
 	local cfg = self.cfg
-	if not in_combat() then return "combat ended" end
-	if not alive(self.mover) then return "enemy dead" end
-	if #self:Living() == 0 then return "all interrupters are down" end
-	if self.force_end then return "forced: End Turn pressed again while a merc was busy" end
+	if not in_combat() then return "combat_ended" end
+	if not alive(self.mover) then return "mover_dead" end
+	if #self:Living() == 0 then return "interrupters_down" end
+	if self.force_end then return "forced_end" end
 	local is_busy = self:Busy()
-	if self.end_requested and not is_busy then return "player ended the interrupt" end
+	if self.end_requested and not is_busy then return "end_request" end
 	if cfg.auto_end and self.actions > 0 and not is_busy and self:OutOfAP()
 		and now() - self.last_activity >= cfg.auto_end_delay_ms then
-		return "interrupters are out of AP (auto end)"
+		return "auto_end"
 	end
 end

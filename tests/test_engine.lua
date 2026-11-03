@@ -695,9 +695,27 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	NetSyncEvents.EndTurn(netUniqueId)
 	t.eq(LogHas("STUCK%? End Turn pressed again while a merc is busy"), true)
 	t.eq(a.command, "Idle")
-	t.eq(st.it:EndReason(), "forced: End Turn pressed again while a merc was busy")
+	t.eq(st.it:EndReason(), "forced_end")
 	Q.active = false
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
+end)
+
+t.case("An error in the end check ends the interrupt with end_check_error", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	function enemy:IsDead() error("boom") end
+	local st = ActiveState({ a }, enemy)
+	st.start_time = 0
+	local ui_reason
+	Q.UI = { End = function(_, reason) ui_reason = reason end }
+	local reason = Q.CheckEnd(st)
+	t.eq(reason, "end_check_error")
+	t.eq(LogHas("EndReason failed: .*boom"), true)
+	Q.EndInterrupt(st, reason)
+	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
+	t.eq(ui_reason, "end_check_error")
+	t.eq(Q.active, false)
 end)
 
 t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of the path", function()

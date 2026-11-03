@@ -315,7 +315,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 	mover:SetAnimSpeedModifier(1000)
 	if in_cmd then
 		mover:PushDestructor(function()
-			IIS.EndInterrupt(st, "enemy command ended (destructor)")
+			IIS.EndInterrupt(st, "mover_command_ended")
 		end)
 	end
 	IIS.active = st
@@ -327,10 +327,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 
 	local elapsed, next_heartbeat = 0, cfg.heartbeat_ms
 	while IIS.active == st do
-		local ok, reason = SafeCall(st, "EndReason", st.it.EndReason, st.it)
-		if not ok then
-			reason = "error in EndReason"
-		end
+		local reason = IIS.CheckEnd(st)
 		if reason then
 			IIS.EndInterrupt(st, reason)
 			break
@@ -360,6 +357,15 @@ function IIS.RunInterrupt(mover, info, dummy)
 	if cfg.after_interrupt == "stop" and st.kind == "move" then
 		SafeCall(st, "StopMover", IIS.StopMover, st)
 	end
+end
+
+-- Returns the end reason code of IISInterrupt, or "end_check_error" when the check fails.
+function IIS.CheckEnd(st)
+	local ok, reason = SafeCall(st, "EndReason", st.it.EndReason, st.it)
+	if not ok then
+		return "end_check_error"
+	end
+	return reason
 end
 
 -- Runs every 100 ms of game time during an interrupt.
