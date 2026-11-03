@@ -13,7 +13,7 @@ IIS.interrupt_count = IIS.interrupt_count or 0
 -- log line. IIS.Activate replaces it at the start of each interrupt.
 local shell
 
---- Makes `it` the active interrupt and starts a new shell for it.
+--- Makes `it` the active interrupt, starts a new shell for it and returns the shell.
 -- `dummy` is the step of the mover's path where the interrupt caught it, or nil.
 function IIS.Activate(it, dummy)
 	shell = { dummy = dummy, start_time = GameTime(), start_ap = {}, forced = {} }
@@ -21,6 +21,7 @@ function IIS.Activate(it, dummy)
 		shell.start_ap[m] = E.APRaw(m)
 	end
 	IIS.active = it
+	return shell
 end
 
 local function Forced(what)
@@ -296,8 +297,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 			IIS.EndInterrupt(it, "mover_command_ended")
 		end)
 	end
-	IIS.Activate(it, dummy)
-	local sh = shell
+	local sh = IIS.Activate(it, dummy)
 	SafeCall(it, "BeginControl", BeginControl, it, sh)
 	SafeCall(it, "UI.Begin", IIS.UI.Begin, it)
 	SafeCall(it, "control log", function()

@@ -771,6 +771,18 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
 
+t.case("Activate returns the new shell with the dummy and the start AP of each interrupter", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 7000 })
+	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), winners = { a },
+		joiners = {}, system = "IIS", kind = "move", cfg = Q.Config }
+	local dummy = { pos = { x = 1, y = 0 } }
+	local sh = Q.Activate(it, dummy)
+	t.eq(Q.active, it)
+	t.eq(sh.dummy, dummy)
+	t.eq(sh.start_ap[a], 7000)
+end)
+
 t.case("DumpStuck logs the command stack of each busy interrupter that is not down", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "stuck_a", command = "FirearmAttack" })
