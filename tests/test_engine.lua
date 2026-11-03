@@ -244,6 +244,7 @@ end
 E.MoverSeesWatcher = function(mover, dummy, w) return world.mover_sees[w] ~= false end
 E.TeamSees = function() return false end
 E.IsCurrentPos = function(mover, pos) return pos == mover.pos end
+E.SameTile = function(a, b) return a ~= nil and b ~= nil and a.x == b.x and a.y == b.y end
 E.Key = function(u) return u.session_id end
 E.InCommandThread = function(u) return u.in_cmd or false end
 E.Rand = function() return world.rand end

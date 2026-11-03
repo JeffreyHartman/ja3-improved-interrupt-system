@@ -239,6 +239,10 @@ function E.TeamSees(team, unit)
 	return team and HasVisibilityTo(team, unit) and true or false
 end
 
+function E.SameTile(a, b)
+	return a and b and a:Equal2D(b) or false
+end
+
 function E.IsCurrentPos(mover, pos)
 	return pos and mover:GetPos():Equal2D(pos)
 end
@@ -600,6 +604,17 @@ function IIS.CommitPlan(plan, upto, why)
 	end
 end
 
+-- Finds the last step of a plan that the mover reached.
+local function ReachedStep(plan, unit)
+	local pos = unit:GetPos()
+	for i = #plan.dummies, plan.first, -1 do
+		local d = plan.dummies[i]
+		if d.pos and E.SameTile(pos, d.pos) then
+			return i
+		end
+	end
+end
+
 -- Classic after an attack: a target that did not see the attacker duels it (NoticeUnseenAttacker,
 -- opplist.cpp:7386). IIS after an attack: every watcher with a full counter that sees the attacker
 -- or was attacked wins (AFTERSHOT_INTERRUPT).
@@ -697,6 +712,15 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 		if system == "Classic" then
 			idx, winners, rows = IIS.FindClassicMoveTrigger(mover, dummies, n)
 		else
+			-- A vanilla interrupt earlier on the path ends the old plan's check before its trigger.
+			-- The mover walked those steps, so the new check must start from their counters.
+			if real and IIS.plans[mover] then
+				local old = IIS.plans[mover]
+				local reached = ReachedStep(old, mover)
+				if reached then
+					IIS.CommitPlan(old, reached, "next check")
+				end
+			end
 			idx, winners, rows, plan = IIS.FindIISMoveTrigger(mover, dummies, n)
 			if real then
 				IIS.plans[mover] = plan
@@ -893,17 +917,6 @@ function IIS.LogLoadedMods()
 		parts[#parts + 1] = string.format("%s (%s %s)", tostring(mod.title), tostring(mod.id), ok and tostring(version) or "?")
 	end
 	Log("mods loaded: %s", #parts > 0 and table.concat(parts, "; ") or "(none)")
-end
-
--- Finds the last step of a plan that the mover reached.
-local function ReachedStep(plan, unit)
-	local pos = unit:GetPos()
-	for i = #plan.dummies, plan.first, -1 do
-		local d = plan.dummies[i]
-		if d.pos and pos:Equal2D(d.pos) then
-			return i
-		end
-	end
 end
 
 function OnMsg.UnitMovementDone(unit)
