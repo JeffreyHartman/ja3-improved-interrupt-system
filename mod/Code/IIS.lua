@@ -297,7 +297,7 @@ function OnMsg.CombatComputedVisibility()
 	end
 end
 
--- Writes the "IIS commit" line for a commit result of Memory.lua.
+-- Writes the log line for a commit result of Memory.lua.
 function IIS.LogCommit(result, why, mover)
 	if not result then return end
 	if result.off_path then

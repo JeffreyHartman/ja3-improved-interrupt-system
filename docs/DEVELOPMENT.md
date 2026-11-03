@@ -5,7 +5,7 @@
 | File | What it does |
 |---|---|
 | `mod/Code/Rules.lua` | The 1.13 formulas. It makes no engine calls. |
-| `mod/Code/Memory.lua` | The Watcher memory: IIS counters, move plans, and the Seen this turn and Seen before marks. It makes no engine calls. |
+| `mod/Code/Memory.lua` | The Watcher memory (counters, Seen this turn, Seen before) and the move plans. It makes no engine calls. |
 | `mod/Code/IIS.lua` | Settings, log and trigger checks. `IIS.E` holds every engine read, so the tests can replace it. |
 | `mod/Code/Control.lua` | Runs an interrupt and gives control to the interrupters. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |

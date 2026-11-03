@@ -48,6 +48,9 @@ The part of a mover's AP that a watcher adds to its counter.
 The registered AP that a watcher holds for one mover.
 _Avoid_: count
 
+**Move plan**:
+The registered AP that each watcher gets on each step of a mover's path, from one move check. The counters get a step's AP when the mover reaches that step.
+
 **Reaction time**:
 The value that a watcher's counter must reach for the watcher to win.
 

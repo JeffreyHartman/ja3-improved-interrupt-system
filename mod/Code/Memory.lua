@@ -1,6 +1,5 @@
--- IISMemory: the Watcher memory of each unit in combat (GLOSSARY.md). It holds the IIS counters,
--- the move plans and the Seen this turn and Seen before marks. The file makes no engine calls,
--- so tools/test.sh runs it with a plain Lua interpreter.
+-- IISMemory holds the Watcher memory of each unit in combat and the move plan of each mover
+-- (GLOSSARY.md). The file makes no engine calls, so tools/test.sh runs it with a plain Lua interpreter.
 
 IISMemory = {}
 local M = IISMemory
@@ -19,6 +18,7 @@ end
 local function Store()
 	local s = store()
 	s.counters = s.counters or {}
+	-- Saves from 0.7.2 and earlier hold the seen marks under these names.
 	s.seen_turn = s.seen_turn or {}
 	s.seen_ever = s.seen_ever or {}
 	return s
