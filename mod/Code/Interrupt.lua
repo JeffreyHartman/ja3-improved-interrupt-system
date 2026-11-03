@@ -20,8 +20,7 @@ local Interrupt = {}
 Interrupt.__index = Interrupt
 
 --- Starts an interrupt and returns its Interrupt object.
--- `o` has `n`, `mover`, `winners`, `joiners`, `system`, `kind` and `cfg` (IIS.Config). `queue` is
--- the list of queued interrupter actions, which counts as busy while it is not empty.
+-- `o` has `n`, `mover`, `winners`, `joiners`, `system`, `kind` and `cfg` (IIS.Config).
 function M.Begin(o)
 	local it = setmetatable({
 		n = o.n,
@@ -30,7 +29,7 @@ function M.Begin(o)
 		kind = o.kind,
 		cfg = o.cfg,
 		interrupters = {},
-		queue = o.queue or {},
+		queue = {},
 		actions = 0,
 		last_activity = now(),
 		end_requested = false,

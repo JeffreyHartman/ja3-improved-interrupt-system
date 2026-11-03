@@ -591,13 +591,12 @@ end)
 -- Control overrides
 
 local function ActiveState(mercs, mover)
-	local st = { n = 1, mover = mover, mercs = mercs, is_merc = {}, top = mercs[1], queue = {}, forced = {},
-		start_ap = {} }
+	local st = { n = 1, mover = mover, mercs = mercs, is_merc = {}, top = mercs[1], forced = {}, start_ap = {} }
 	for _, m in ipairs(mercs) do
 		st.is_merc[m] = true
 	end
 	st.it = IISInterrupt.Begin{ n = 1, mover = mover, winners = mercs, joiners = {}, system = "IIS", kind = "move",
-		cfg = Q.Config, queue = st.queue }
+		cfg = Q.Config }
 	Q.active = st
 	return st
 end
@@ -653,12 +652,45 @@ t.case("StartCombatAction queues behind another interrupter and starts after it"
 	CombatActions_RunningState[a] = "start"
 	StartCombatAction("Move", b, 2000)
 	t.eq(#ran_actions, 0)
-	t.eq(#st.queue, 1)
+	t.eq(st.it:QueueLength(), 1)
+	t.eq(LogHas("queued Move: 1 waiting"), true)
 	CombatActions_RunningState[a] = "PostAction"
 	OnMsg.CombatPostAction(a)
 	RunThreads()
 	t.eq(#ran_actions, 1) -- Move plays alongside a PostAction
-	t.eq(#st.queue, 0)
+	t.eq(st.it:QueueLength(), 0)
+end)
+
+t.case("StartCombatAction drops the queued action of a unit that died", function()
+	ResetWorld()
+	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	local st = ActiveState({ a, b }, enemy)
+	CombatActions_RunningState[a] = "start"
+	StartCombatAction("Attack", b, 2000)
+	b.dead = true
+	CombatActions_RunningState[a] = "PostAction"
+	OnMsg.CombatPostAction(a)
+	RunThreads()
+	t.eq(#ran_actions, 0)
+	t.eq(st.it:QueueLength(), 0)
+	t.eq(LogHas("INT #1 dropped queued Attack: the unit is gone"), true)
+end)
+
+t.case("EndInterrupt refunds the AP of queued actions that never started", function()
+	ResetWorld()
+	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b", ap = 10000 })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	local st = ActiveState({ a, b }, enemy)
+	st.start_time = 0
+	CombatActions_RunningState[a] = "start"
+	StartCombatAction("Attack", b, 3000)
+	t.eq(b.ActionPoints, 7000)
+	Q.UI = { End = function() end }
+	Q.EndInterrupt(st, "test")
+	t.eq(b.ActionPoints, 10000)
+	t.eq(st.it:QueueLength(), 0)
+	t.eq(LogHas("INT #1 dropped queued action Attack of " .. Q.Name(b) .. ", refunded 3000 raw AP"), true)
 end)
 
 t.case("StartCombatAction keeps vanilla behavior for other units", function()

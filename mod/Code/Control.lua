@@ -287,11 +287,10 @@ function IIS.RunInterrupt(mover, info, dummy)
 		dummy = dummy,
 		start_time = GameTime(),
 		start_ap = {},
-		queue = {},
 		forced = {},
 	}
 	st.it = IISInterrupt.Begin{ n = n, mover = mover, winners = winners, joiners = joined, system = info.system,
-		kind = info.kind, cfg = cfg, queue = st.queue }
+		kind = info.kind, cfg = cfg }
 	for _, m in ipairs(mercs) do
 		st.is_merc[m] = true
 		st.start_ap[m] = E.APRaw(m)
@@ -345,7 +344,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 				for _, m in ipairs(st.mercs) do
 					aps[#aps + 1] = string.format("%s=%s%s", Name(m), AP(m), MercBusy(m) and "(busy)" or "")
 				end
-				local line = string.format("%s queue=%d end_requested=%s | %s | %s", table.concat(aps, " "), #st.queue,
+				local line = string.format("%s queue=%d end_requested=%s | %s | %s", table.concat(aps, " "), st.it:QueueLength(),
 					tostring(st.it:EndRequested()), UIState(st), RunningStateSnapshot())
 				if line ~= st.wait_line or elapsed - st.wait_logged >= cfg.heartbeat_repeat_ms then
 					st.wait_line, st.wait_logged = line, elapsed
@@ -385,16 +384,15 @@ function IIS.EndInterrupt(st, reason)
 	local mover = st.mover
 
 	-- Queued actions that never started already paid their AP.
-	for _, p in ipairs(st.queue) do
+	for _, e in ipairs(st.it:Drain()) do
 		SafeCall(st, "refund", function()
-			local action_id, unit, ap = unpack_params(p, 1, 3)
+			local action_id, unit, ap = e.action_id, e.unit, e.ap
 			if IsValid(unit) and (ap or 0) > 0 then
 				unit:GainAP(ap)
 			end
 			Log("INT #%d dropped queued action %s of %s, refunded %s raw AP", st.n, tostring(action_id), Name(unit), tostring(ap))
 		end)
 	end
-	st.queue = {}
 
 	SafeCall(st, "restore visibility", function()
 		if IsValid(mover) then
@@ -500,33 +498,23 @@ end
 -- interrupters. The vanilla queue would wait for the frozen enemy's action, which does not end.
 function IIS.TryRunQueue(st)
 	if IIS.active ~= st then return end
-	local i = 1
-	while i <= #st.queue do
-		local p = st.queue[i]
-		local action_id, unit = unpack_params(p, 1, 2)
-		local action = CombatActions[action_id]
-		local simultaneous = action and action.SimultaneousPlay or false
-		if not IsValid(unit) or unit:IsDead() then
-			table.remove(st.queue, i)
-			Log("INT #%d dropped queued %s: the unit is gone", st.n, tostring(action_id))
-		else
-			local states = {}
-			for _, m in ipairs(st.mercs) do
-				local state = m ~= unit and CombatActions_RunningState[m]
-				if state then
-					states[#states + 1] = state
-				end
-			end
-			if not CombatActions_RunningState[unit] and R.CanStartAction(simultaneous, states) then
-				table.remove(st.queue, i)
-				IIS.RunMercAction(st, unpack_params(p))
-			else
-				i = i + 1
-				if not simultaneous then
-					break
-				end
+	local function can_start(e)
+		local states = {}
+		for _, m in ipairs(st.mercs) do
+			local state = m ~= e.unit and CombatActions_RunningState[m]
+			if state then
+				states[#states + 1] = state
 			end
 		end
+		return not CombatActions_RunningState[e.unit] and R.CanStartAction(e.simultaneous, states)
+	end
+	local function on_drop(e)
+		Log("INT #%d dropped queued %s: the unit is gone", st.n, tostring(e.action_id))
+	end
+	local e = st.it:TakeNext(can_start, on_drop)
+	while e do
+		IIS.RunMercAction(st, unpack_params(e.packed))
+		e = st.it:TakeNext(can_start, on_drop)
 	end
 end
 
@@ -600,11 +588,13 @@ function StartCombatAction(action_id, unit, ap, ...)
 		return orig_StartCombatAction(action_id, unit, ap, ...)
 	end
 	unit:ConsumeAP(ap, action_id, ...)
-	table.insert(st.queue, pack_params(action_id, unit, ap, ...))
-	st.it:Activity()
+	local action = CombatActions[action_id]
+	st.it:Enqueue{ action_id = action_id, unit = unit, ap = ap, simultaneous = action and action.SimultaneousPlay or false,
+		packed = pack_params(action_id, unit, ap, ...) }
 	IIS.TryRunQueue(st)
-	if #st.queue > 0 then
-		Log("INT #%d queued %s: %d waiting | %s", st.n, tostring(action_id), #st.queue, RunningStateSnapshot())
+	local waiting = st.it:QueueLength()
+	if waiting > 0 then
+		Log("INT #%d queued %s: %d waiting | %s", st.n, tostring(action_id), waiting, RunningStateSnapshot())
 	end
 end
 
@@ -620,7 +610,7 @@ local function OnInterrupterActionStep(unit, what)
 		-- merc that moved would not see new enemies without a forced update.
 		SafeCall(st, "VisibilityUpdate", VisibilityUpdate, true)
 	end
-	if #st.queue > 0 then
+	if st.it:QueueLength() > 0 then
 		CreateGameTimeThread(IIS.TryRunQueue, st)
 	end
 end
