@@ -89,8 +89,8 @@ local function ThreadStackLines(thread, max_frames)
 	return lines
 end
 
-local function MercBusy(m)
-	return IsValid(m) and not m:IsIncapacitated() and (HasCombatActionInProgress(m) or not m:IsIdleCommand())
+local function RunsActionOrCommand(m)
+	return HasCombatActionInProgress(m) or not m:IsIdleCommand()
 end
 
 IISInterrupt.Setup{
@@ -98,7 +98,7 @@ IISInterrupt.Setup{
 	in_combat = function() return not not g_Combat end,
 	alive = function(u) return IsValid(u) and not u:IsDead() end,
 	can_act = function(u) return IsValid(u) and not u:IsIncapacitated() end,
-	busy = MercBusy,
+	busy = RunsActionOrCommand,
 	ap_raw = function(u) return E.APRaw(u) end,
 	walk_ap = function() return E.WalkRaw() end,
 }
@@ -108,7 +108,7 @@ function IIS.DumpStuck(it, why)
 	Log("INT #%d STUCK? %s: mover cmd=%s interrupted=%s pain_thread=%s | %s", n, why,
 		tostring(mover.command), tostring(mover.interrupted), tostring((IsValidThread(mover.pain_thread))), RunningStateSnapshot())
 	for _, m in ipairs(it:Interrupters()) do
-		if MercBusy(m) then
+		if it:CanAct(m) and RunsActionOrCommand(m) then
 			Log("INT #%d   merc %s cmd=%s idle=%s running=%s, command thread stack:", n, Name(m), tostring(m.command),
 				tostring((m:IsIdleCommand())), tostring(CombatActions_RunningState[m]))
 			for _, line in ipairs(ThreadStackLines(m.command_thread)) do
@@ -319,7 +319,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 			SafeCall(it, "heartbeat", function()
 				local aps = {}
 				for _, m in ipairs(it:Interrupters()) do
-					aps[#aps + 1] = string.format("%s=%s%s", Name(m), AP(m), MercBusy(m) and "(busy)" or "")
+					aps[#aps + 1] = string.format("%s=%s%s", Name(m), AP(m), it:CanAct(m) and RunsActionOrCommand(m) and "(busy)" or "")
 				end
 				local line = string.format("%s queue=%d end_requested=%s | %s | %s", table.concat(aps, " "), it:QueueLength(),
 					tostring(it:HasEndRequest()), UIState(it), RunningStateSnapshot())

@@ -771,6 +771,19 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
 
+t.case("DumpStuck logs the command stack of each busy interrupter that is not down", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "stuck_a", command = "FirearmAttack" })
+	local b = FakeUnit({ id = "stuck_b", command = "FirearmAttack" })
+	local c = FakeUnit({ id = "stuck_c" })
+	b.down = true
+	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	Q.DumpStuck(it, "test")
+	t.eq(LogHas("merc stuck_a#stuck_a cmd=FirearmAttack"), true)
+	t.eq(LogHas("merc stuck_b#stuck_b"), false)
+	t.eq(LogHas("merc stuck_c#stuck_c"), false)
+end)
+
 t.case("An error in the end check ends the interrupt with end_check_error", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a" })

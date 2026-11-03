@@ -199,6 +199,26 @@ t.case("Interrupt: a down interrupter is not busy", function()
 	t.eq(it:Busy(), false)
 end)
 
+t.case("Interrupt: Busy asks the engine busy function only about interrupters that can act", function()
+	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	w[1].down = true
+	local asked = {}
+	I.Setup{
+		now = function() return clock end,
+		in_combat = function() return combat end,
+		alive = function(u) return not u.dead end,
+		can_act = function(u) return not u.down end,
+		busy = function(u)
+			asked[#asked + 1] = u.id
+			return u.busy
+		end,
+		ap_raw = function(u) return u.ap end,
+		walk_ap = function() return 1000 end,
+	}
+	t.eq(it:Busy(), false)
+	t.eq(table.concat(asked, " "), "b")
+end)
+
 local function Ids(list)
 	local ids = {}
 	for i, e in ipairs(list) do

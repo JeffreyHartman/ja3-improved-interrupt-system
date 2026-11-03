@@ -10,7 +10,7 @@ local now, in_combat, alive, can_act, busy, ap_raw, walk_ap
 -- `now()` returns the game time in ms, `in_combat()` is true while combat runs, `alive(u)` is false
 -- for a dead or removed unit, `can_act(u)` is false for a down unit, `busy(u)` is true while a unit
 -- runs an action or a command, `ap_raw(u)` returns a unit's raw AP and `walk_ap()` the raw AP of one
--- step.
+-- step. The module calls `busy(u)` only for a unit that `can_act(u)` accepts.
 function M.Setup(o)
 	now, in_combat, alive, can_act, busy = o.now, o.in_combat, o.alive, o.can_act, o.busy
 	ap_raw, walk_ap = o.ap_raw, o.walk_ap
