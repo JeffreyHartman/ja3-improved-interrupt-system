@@ -128,6 +128,48 @@ function Interrupt:OutOfAP()
 	return true
 end
 
+--- Adds an interrupter action to the end of the queue and restarts the Auto end delay.
+-- `e` has `action_id`, `unit`, `ap` (the raw AP that the unit already paid), `simultaneous` (true
+-- when the action can play alongside others) and `packed` (the arguments for the action).
+function Interrupt:Enqueue(e)
+	self.queue[#self.queue + 1] = e
+	self:Activity()
+end
+
+--- Removes and returns the first queued action that can start, or nil.
+-- `can_start(e)` is true when the action can start now. The scan stops at a blocked action that
+-- is not simultaneous. The action of a dead unit leaves the queue and goes to `on_drop(e)`.
+function Interrupt:TakeNext(can_start, on_drop)
+	local queue = self.queue
+	local i = 1
+	while i <= #queue do
+		local e = queue[i]
+		if not alive(e.unit) then
+			table.remove(queue, i)
+			on_drop(e)
+		elseif can_start(e) then
+			table.remove(queue, i)
+			return e
+		elseif not e.simultaneous then
+			return nil
+		else
+			i = i + 1
+		end
+	end
+end
+
+--- Empties the queue and returns the actions that never started, in queue order.
+function Interrupt:Drain()
+	local list = self.queue
+	self.queue = {}
+	return list
+end
+
+--- The number of queued actions.
+function Interrupt:QueueLength()
+	return #self.queue
+end
+
 --- Records an End Turn press.
 -- Returns "requested" for the End request, "forced" for a Forced end, or nil when the press
 -- changes nothing.

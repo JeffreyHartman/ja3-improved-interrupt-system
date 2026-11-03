@@ -181,13 +181,15 @@ t.case("Interrupt: EndRequested is true after the first End Turn press", functio
 	t.eq(it:EndRequested(), true)
 end)
 
+local function Entry(id, unit, o)
+	o = o or {}
+	return { action_id = id, unit = unit, ap = o.ap or 1000, simultaneous = o.simultaneous or false, packed = id }
+end
+
 t.case("Interrupt: a queued action counts as busy", function()
-	local queue = {}
-	Fresh()
-	local it = I.Begin{ n = 1, mover = Unit("mover"), winners = { Unit("a") }, joiners = {}, system = "IIS",
-		kind = "move", cfg = cfg, queue = queue }
+	local it, _, w = Fresh()
 	t.eq(it:Busy(), false)
-	queue[1] = "Attack"
+	it:Enqueue(Entry("Attack", w[1]))
 	t.eq(it:Busy(), true)
 end)
 
@@ -195,4 +197,84 @@ t.case("Interrupt: a down interrupter is not busy", function()
 	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
 	w[1].busy, w[1].down = true, true
 	t.eq(it:Busy(), false)
+end)
+
+local function Ids(list)
+	local ids = {}
+	for i, e in ipairs(list) do
+		ids[i] = e.action_id
+	end
+	return table.concat(ids, " ")
+end
+
+local function Yes() return true end
+
+t.case("Interrupt: TakeNext takes the actions that can start in queue order", function()
+	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	it:Enqueue(Entry("Attack", w[1]))
+	it:Enqueue(Entry("Move", w[2]))
+	t.eq(it:TakeNext(Yes).action_id, "Attack")
+	t.eq(it:QueueLength(), 1)
+	t.eq(it:TakeNext(Yes).action_id, "Move")
+	t.eq(it:TakeNext(Yes), nil)
+	t.eq(it:QueueLength(), 0)
+end)
+
+t.case("Interrupt: a blocked action that cannot play alongside others stops the scan", function()
+	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	it:Enqueue(Entry("Attack", w[1]))
+	it:Enqueue(Entry("Move", w[2], { simultaneous = true }))
+	local asked = {}
+	local function OnlyMove(e)
+		asked[#asked + 1] = e.action_id
+		return e.action_id == "Move"
+	end
+	t.eq(it:TakeNext(OnlyMove), nil)
+	t.eq(table.concat(asked, " "), "Attack")
+	t.eq(it:QueueLength(), 2)
+end)
+
+t.case("Interrupt: a blocked simultaneous action lets the scan continue", function()
+	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	it:Enqueue(Entry("Move", w[1], { simultaneous = true }))
+	it:Enqueue(Entry("Attack", w[2]))
+	local e = it:TakeNext(function(x) return x.action_id == "Attack" end)
+	t.eq(e.action_id, "Attack")
+	t.eq(it:QueueLength(), 1)
+	t.eq(it:TakeNext(Yes).action_id, "Move")
+end)
+
+t.case("Interrupt: TakeNext drops the action of a dead unit and reports it to on_drop", function()
+	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	it:Enqueue(Entry("Attack", w[1]))
+	it:Enqueue(Entry("Move", w[2]))
+	w[1].dead = true
+	local dropped = {}
+	local e = it:TakeNext(Yes, function(x) dropped[#dropped + 1] = x end)
+	t.eq(e.action_id, "Move")
+	t.eq(Ids(dropped), "Attack")
+	t.eq(it:QueueLength(), 0)
+end)
+
+t.case("Interrupt: Drain returns the actions that did not start and empties the queue", function()
+	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	it:Enqueue(Entry("Attack", w[1]))
+	it:Enqueue(Entry("Move", w[2]))
+	it:Enqueue(Entry("Reload", w[1]))
+	it:TakeNext(Yes)
+	t.eq(Ids(it:Drain()), "Move Reload")
+	t.eq(it:QueueLength(), 0)
+	t.eq(#it:Drain(), 0)
+end)
+
+t.case("Interrupt: Enqueue restarts the Auto end delay", function()
+	local it, _, w = Fresh()
+	it:ActionStarted()
+	clock = 1000
+	it:Enqueue(Entry("Attack", w[1]))
+	it:TakeNext(Yes)
+	clock = 2499
+	t.eq(it:EndReason(), nil)
+	clock = 2500
+	t.eq(it:EndReason(), "interrupters are out of AP (auto end)")
 end)
