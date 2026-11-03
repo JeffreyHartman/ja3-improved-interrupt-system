@@ -11,6 +11,7 @@ return PlaceObj('ModDef', {
 	'code', {
 		"Code/Rules.lua",
 		"Code/Memory.lua",
+		"Code/Interrupt.lua",
 		"Code/IIS.lua",
 		"Code/Control.lua",
 		"Code/UI.lua",
