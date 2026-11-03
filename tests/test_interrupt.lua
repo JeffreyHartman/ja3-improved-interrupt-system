@@ -38,7 +38,7 @@ t.case("Interrupt: Auto end waits for the delay after the last action", function
 	clock = 2499
 	t.eq(it:EndReason(), nil)
 	clock = 2500
-	t.eq(it:EndReason(), "interrupters are out of AP (auto end)")
+	t.eq(it:EndReason(), "auto_end")
 end)
 
 t.case("Interrupt: an action step restarts the Auto end delay", function()
@@ -49,7 +49,7 @@ t.case("Interrupt: an action step restarts the Auto end delay", function()
 	clock = 2499
 	t.eq(it:EndReason(), nil)
 	clock = 2500
-	t.eq(it:EndReason(), "interrupters are out of AP (auto end)")
+	t.eq(it:EndReason(), "auto_end")
 end)
 
 t.case("Interrupt: no Auto end before the first action", function()
@@ -69,7 +69,7 @@ t.case("Interrupt: an End request with nobody busy ends the interrupt", function
 	local it = Fresh{ winners = { Unit("a", { ap = 5000 }) } }
 	t.eq(it:EndReason(), nil)
 	t.eq(it:EndTurnPressed(), "requested")
-	t.eq(it:EndReason(), "player ended the interrupt")
+	t.eq(it:EndReason(), "end_request")
 end)
 
 t.case("Interrupt: an End request waits for the busy interrupter", function()
@@ -79,7 +79,7 @@ t.case("Interrupt: an End request waits for the busy interrupter", function()
 	t.eq(it:EndTurnPressed(), "requested")
 	t.eq(it:EndReason(), nil)
 	w[1].busy = false
-	t.eq(it:EndReason(), "player ended the interrupt")
+	t.eq(it:EndReason(), "end_request")
 end)
 
 t.case("Interrupt: a second press while busy is a Forced end, and later presses do nothing", function()
@@ -87,7 +87,7 @@ t.case("Interrupt: a second press while busy is a Forced end, and later presses 
 	w[1].busy = true
 	t.eq(it:EndTurnPressed(), "requested")
 	t.eq(it:EndTurnPressed(), "forced")
-	t.eq(it:EndReason(), "forced: End Turn pressed again while a merc was busy")
+	t.eq(it:EndReason(), "forced_end")
 	t.eq(it:EndTurnPressed(), nil)
 end)
 
@@ -95,7 +95,7 @@ t.case("Interrupt: a second press with nobody busy does nothing", function()
 	local it = Fresh()
 	t.eq(it:EndTurnPressed(), "requested")
 	t.eq(it:EndTurnPressed(), nil)
-	t.eq(it:EndReason(), "player ended the interrupt")
+	t.eq(it:EndReason(), "end_request")
 end)
 
 t.case("Interrupt: the interrupt ends when the last interrupter goes down", function()
@@ -103,7 +103,7 @@ t.case("Interrupt: the interrupt ends when the last interrupter goes down", func
 	w[1].down = true
 	t.eq(it:EndReason(), nil)
 	it:Interrupters()[2].down = true
-	t.eq(it:EndReason(), "all interrupters are down")
+	t.eq(it:EndReason(), "interrupters_down")
 end)
 
 t.case("Interrupt: the interrupt ends when the mover is dead", function()
@@ -111,13 +111,13 @@ t.case("Interrupt: the interrupt ends when the mover is dead", function()
 	mover.down = true
 	t.eq(it:EndReason(), nil)
 	mover.dead = true
-	t.eq(it:EndReason(), "enemy dead")
+	t.eq(it:EndReason(), "mover_dead")
 end)
 
 t.case("Interrupt: the interrupt ends when combat ends", function()
 	local it = Fresh{ winners = { Unit("a", { ap = 5000 }) } }
 	combat = false
-	t.eq(it:EndReason(), "combat ended")
+	t.eq(it:EndReason(), "combat_ended")
 end)
 
 -- Ticks 100 ms at a time and returns the busy times at which a stuck dump was due.
@@ -163,7 +163,7 @@ t.case("Interrupt: a busy tick restarts the Auto end delay", function()
 	w[1].busy = false
 	t.eq(it:EndReason(), nil)
 	clock = clock + 1500
-	t.eq(it:EndReason(), "interrupters are out of AP (auto end)")
+	t.eq(it:EndReason(), "auto_end")
 end)
 
 t.case("Interrupt: ActionStarted counts the actions for the log", function()
@@ -276,5 +276,34 @@ t.case("Interrupt: Enqueue restarts the Auto end delay", function()
 	clock = 2499
 	t.eq(it:EndReason(), nil)
 	clock = 2500
-	t.eq(it:EndReason(), "interrupters are out of AP (auto end)")
+	t.eq(it:EndReason(), "auto_end")
+end)
+
+t.case("Interrupt: IsInterrupter is true for the winners and the joiners only", function()
+	local a, b = Unit("a"), Unit("b")
+	local it, mover = Fresh{ winners = { a }, joiners = { b } }
+	t.eq(it:IsInterrupter(a), true)
+	t.eq(it:IsInterrupter(b), true)
+	t.eq(it:IsInterrupter(mover), false)
+	t.eq(it:IsInterrupter(Unit("c")), false)
+	t.eq(it:IsInterrupter(nil), false)
+end)
+
+t.case("Interrupt: CanAct is true for an interrupter that is not down", function()
+	local a, b = Unit("a"), Unit("b")
+	local it, mover = Fresh{ winners = { a }, joiners = { b } }
+	t.eq(it:CanAct(a), true)
+	t.eq(it:CanAct(b), true)
+	b.down = true
+	t.eq(it:CanAct(b), false)
+	t.eq(it:CanAct(mover), false)
+	t.eq(it:CanAct(nil), false)
+end)
+
+t.case("Interrupt: Top is the first winner, even when it is down", function()
+	local a, b, c = Unit("a"), Unit("b"), Unit("c")
+	local it = Fresh{ winners = { a, b }, joiners = { c } }
+	t.eq(it:Top(), a)
+	a.down = true
+	t.eq(it:Top(), a)
 end)

@@ -29,6 +29,7 @@ function M.Begin(o)
 		kind = o.kind,
 		cfg = o.cfg,
 		interrupters = {},
+		is_interrupter = {},
 		queue = {},
 		actions = 0,
 		last_activity = now(),
@@ -39,9 +40,25 @@ function M.Begin(o)
 	for _, list in ipairs{ o.winners, o.joiners or {} } do
 		for _, u in ipairs(list) do
 			it.interrupters[#it.interrupters + 1] = u
+			it.is_interrupter[u] = true
 		end
 	end
 	return it
+end
+
+--- True when `u` is a winner or a joiner.
+function Interrupt:IsInterrupter(u)
+	return u ~= nil and self.is_interrupter[u] or false
+end
+
+--- True when `u` is an interrupter that is not down.
+function Interrupt:CanAct(u)
+	return self:IsInterrupter(u) and can_act(u)
+end
+
+--- The first winner.
+function Interrupt:Top()
+	return self.interrupters[1]
 end
 
 --- The winners and then the joiners, as a new list.
@@ -57,7 +74,7 @@ end
 function Interrupt:Living()
 	local list = {}
 	for _, u in ipairs(self.interrupters) do
-		if can_act(u) then
+		if self:CanAct(u) then
 			list[#list + 1] = u
 		end
 	end
@@ -188,17 +205,19 @@ function Interrupt:EndRequested()
 	return self.end_requested
 end
 
---- The reason that the interrupt ends now, or nil while it goes on.
+--- The end reason code when the interrupt ends now, or nil while it goes on.
+-- The codes are "combat_ended", "mover_dead", "interrupters_down", "forced_end", "end_request"
+-- and "auto_end". UI.lua maps each code to the combat log text.
 function Interrupt:EndReason()
 	local cfg = self.cfg
-	if not in_combat() then return "combat ended" end
-	if not alive(self.mover) then return "enemy dead" end
-	if #self:Living() == 0 then return "all interrupters are down" end
-	if self.force_end then return "forced: End Turn pressed again while a merc was busy" end
+	if not in_combat() then return "combat_ended" end
+	if not alive(self.mover) then return "mover_dead" end
+	if #self:Living() == 0 then return "interrupters_down" end
+	if self.force_end then return "forced_end" end
 	local is_busy = self:Busy()
-	if self.end_requested and not is_busy then return "player ended the interrupt" end
+	if self.end_requested and not is_busy then return "end_request" end
 	if cfg.auto_end and self.actions > 0 and not is_busy and self:OutOfAP()
 		and now() - self.last_activity >= cfg.auto_end_delay_ms then
-		return "interrupters are out of AP (auto end)"
+		return "auto_end"
 	end
 end

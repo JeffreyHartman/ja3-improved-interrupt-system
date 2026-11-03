@@ -26,7 +26,8 @@ dofile("mod/Code/Rules.lua")
 dofile("mod/Code/Memory.lua")
 dofile("mod/Code/Interrupt.lua")
 
-local files = { "tests/test_rules.lua", "tests/test_memory.lua", "tests/test_interrupt.lua", "tests/test_engine.lua" }
+local files = { "tests/test_rules.lua", "tests/test_memory.lua", "tests/test_interrupt.lua", "tests/test_engine.lua",
+	"tests/test_ui.lua" }
 for _, f in ipairs(files) do
 	local chunk, err = loadfile(f)
 	if not chunk then

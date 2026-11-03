@@ -590,13 +590,10 @@ end)
 ------------------------------------------------------------------------------------------------
 -- Control overrides
 
-local function ActiveState(mercs, mover)
-	local st = { n = 1, mover = mover, mercs = mercs, is_merc = {}, top = mercs[1], forced = {}, start_ap = {} }
-	for _, m in ipairs(mercs) do
-		st.is_merc[m] = true
-	end
-	st.it = IISInterrupt.Begin{ n = 1, mover = mover, winners = mercs, joiners = {}, system = "IIS", kind = "move",
-		cfg = Q.Config }
+local function ActiveState(winners, mover, joiners)
+	local st = { n = 1, mover = mover, forced = {}, start_ap = {} }
+	st.it = IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, joiners = joiners or {}, system = "IIS",
+		kind = "move", cfg = Q.Config }
 	Q.active = st
 	return st
 end
@@ -615,6 +612,49 @@ t.case("CanBeControlled: interrupters yes, other player units no, enemies vanill
 	t.eq(Unit.CanBeControlled(a), false)
 	Q.active = false
 	t.eq(Unit.CanBeControlled(b), "vanilla")
+end)
+
+t.case("CanBeControlled: a collective joiner is an interrupter", function()
+	ResetWorld()
+	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
+	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	t.eq(Unit.CanBeControlled(b), true)
+	b.down = true
+	t.eq(Unit.CanBeControlled(b), false)
+end)
+
+local function FakeSelection(unit)
+	SelectedObj = unit
+	SelectObj = function(o) SelectedObj = o end
+	Q.UI = { Refresh = function() end }
+end
+
+t.case("Tick selects the next interrupter that can act when the selected one goes down", function()
+	ResetWorld()
+	local a, b, c = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "c" })
+	local st = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	FakeSelection(a)
+	Q.Tick(st, 100)
+	t.eq(SelectedObj, a)
+	a.down, b.down = true, true
+	Q.Tick(st, 200)
+	t.eq(SelectedObj, c)
+	t.eq(LogHas("INT #1 a#a is down, selecting c#c"), true)
+end)
+
+t.case("SelectionChange selects an interrupter in place of another player unit", function()
+	ResetWorld()
+	local a, b, other = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "other" })
+	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	FakeSelection(b)
+	OnMsg.SelectionChange()
+	RunThreads()
+	t.eq(SelectedObj, b)
+	FakeSelection(other)
+	OnMsg.SelectionChange()
+	RunThreads()
+	t.eq(SelectedObj, a)
+	t.eq(LogHas("other#other is not an interrupter, selecting a#a"), true)
 end)
 
 t.case("CombatActionCannotBeStarted ignores the frozen enemy and counts the interrupters", function()
@@ -727,9 +767,27 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	NetSyncEvents.EndTurn(netUniqueId)
 	t.eq(LogHas("STUCK%? End Turn pressed again while a merc is busy"), true)
 	t.eq(a.command, "Idle")
-	t.eq(st.it:EndReason(), "forced: End Turn pressed again while a merc was busy")
+	t.eq(st.it:EndReason(), "forced_end")
 	Q.active = false
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
+end)
+
+t.case("An error in the end check ends the interrupt with end_check_error", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	function enemy:IsDead() error("boom") end
+	local st = ActiveState({ a }, enemy)
+	st.start_time = 0
+	local ui_reason
+	Q.UI = { End = function(_, reason) ui_reason = reason end }
+	local reason = Q.CheckEnd(st)
+	t.eq(reason, "end_check_error")
+	t.eq(LogHas("EndReason failed: .*boom"), true)
+	Q.EndInterrupt(st, reason)
+	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
+	t.eq(ui_reason, "end_check_error")
+	t.eq(Q.active, false)
 end)
 
 t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of the path", function()

@@ -11,22 +11,12 @@ IIS.interrupt_count = IIS.interrupt_count or 0
 
 local function IsInterrupter(unit)
 	local st = IIS.active
-	return st and unit and st.is_merc[unit] or false
+	return st and st.it:IsInterrupter(unit) or false
 end
 IIS.IsInterrupter = IsInterrupter
 
 local function Forced(st, what)
 	st.forced[what] = (st.forced[what] or 0) + 1
-end
-
-local function Living(st)
-	local list = {}
-	for _, m in ipairs(st.mercs) do
-		if IsValid(m) and not m:IsIncapacitated() then
-			list[#list + 1] = m
-		end
-	end
-	return list
 end
 
 -- An error in code that runs in the frozen enemy's command thread ends the enemy's command, so
@@ -70,7 +60,7 @@ local function UIState(st)
 	local mover = st.mover
 	return string.format("selected=%s igi=%s mover_visible=%s camera_locks=%s",
 		Name(SelectedObj), tostring(GetInGameInterfaceMode()),
-		tostring(IsValid(mover) and st.top.team and HasVisibilityTo(st.top.team, mover)),
+		tostring(IsValid(mover) and st.it:Top().team and HasVisibilityTo(st.it:Top().team, mover)),
 		ReasonsToString(CameraLockReasons()))
 end
 IIS.UIState = UIState
@@ -109,7 +99,7 @@ function IIS.DumpStuck(st, why)
 	local mover = st.mover
 	Log("INT #%d STUCK? %s: mover cmd=%s interrupted=%s pain_thread=%s | %s", st.n, why,
 		tostring(mover.command), tostring(mover.interrupted), tostring((IsValidThread(mover.pain_thread))), RunningStateSnapshot())
-	for _, m in ipairs(st.mercs) do
+	for _, m in ipairs(st.it:Interrupters()) do
 		if MercBusy(m) then
 			Log("INT #%d   merc %s cmd=%s idle=%s running=%s, command thread stack:", st.n, Name(m), tostring(m.command),
 				tostring((m:IsIdleCommand())), tostring(CombatActions_RunningState[m]))
@@ -176,7 +166,7 @@ local function BeginControl(st)
 	st.saved_player_control = g_Combat.is_player_control
 	g_Combat:SetPlayerControl(true)
 
-	SelectObj(st.top)
+	SelectObj(st.it:Top())
 	if GetInGameInterfaceMode() ~= "IModeCombatMovement" then
 		SetInGameInterfaceMode("IModeCombatMovement")
 	end
@@ -277,9 +267,6 @@ function IIS.RunInterrupt(mover, info, dummy)
 	local st = {
 		n = n,
 		mover = mover,
-		mercs = mercs,
-		is_merc = {},
-		top = mercs[1],
 		joined = joined,
 		kind = info.kind,
 		system = info.system,
@@ -291,15 +278,14 @@ function IIS.RunInterrupt(mover, info, dummy)
 	}
 	st.it = IISInterrupt.Begin{ n = n, mover = mover, winners = winners, joiners = joined, system = info.system,
 		kind = info.kind, cfg = cfg }
-	for _, m in ipairs(mercs) do
-		st.is_merc[m] = true
+	for _, m in ipairs(st.it:Interrupters()) do
 		st.start_ap[m] = E.APRaw(m)
 	end
 
 	local in_cmd = E.InCommandThread(mover)
 	Log("INT #%d BEGIN %s %s: mover=%s pos=%s ap=%s %s in_command_thread=%s", n, info.system, info.kind, Name(mover), Pos(mover),
 		AP(mover), info.where or "", tostring(in_cmd))
-	for i, m in ipairs(mercs) do
+	for i, m in ipairs(st.it:Interrupters()) do
 		local joined_mark = table.find(joined, m) and " (collective)" or ""
 		Log("INT #%d   interrupter %d: %s ap=%s%s", n, i, Name(m), AP(m), joined_mark)
 	end
@@ -314,7 +300,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 	mover:SetAnimSpeedModifier(1000)
 	if in_cmd then
 		mover:PushDestructor(function()
-			IIS.EndInterrupt(st, "enemy command ended (destructor)")
+			IIS.EndInterrupt(st, "mover_command_ended")
 		end)
 	end
 	IIS.active = st
@@ -326,10 +312,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 
 	local elapsed, next_heartbeat = 0, cfg.heartbeat_ms
 	while IIS.active == st do
-		local ok, reason = SafeCall(st, "EndReason", st.it.EndReason, st.it)
-		if not ok then
-			reason = "error in EndReason"
-		end
+		local reason = IIS.CheckEnd(st)
 		if reason then
 			IIS.EndInterrupt(st, reason)
 			break
@@ -341,7 +324,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 			next_heartbeat = next_heartbeat + cfg.heartbeat_ms
 			SafeCall(st, "heartbeat", function()
 				local aps = {}
-				for _, m in ipairs(st.mercs) do
+				for _, m in ipairs(st.it:Interrupters()) do
 					aps[#aps + 1] = string.format("%s=%s%s", Name(m), AP(m), MercBusy(m) and "(busy)" or "")
 				end
 				local line = string.format("%s queue=%d end_requested=%s | %s | %s", table.concat(aps, " "), st.it:QueueLength(),
@@ -361,6 +344,15 @@ function IIS.RunInterrupt(mover, info, dummy)
 	end
 end
 
+-- Returns the end reason code of IISInterrupt, or "end_check_error" when the check fails.
+function IIS.CheckEnd(st)
+	local ok, reason = SafeCall(st, "EndReason", st.it.EndReason, st.it)
+	if not ok then
+		return "end_check_error"
+	end
+	return reason
+end
+
 -- Runs every 100 ms of game time during an interrupt.
 function IIS.Tick(st, elapsed)
 	if st.it:Tick(100) then
@@ -368,8 +360,8 @@ function IIS.Tick(st, elapsed)
 	end
 	-- An interrupter that goes down must not stay selected.
 	local sel = SelectedObj
-	if IsKindOf(sel, "Unit") and st.is_merc[sel] and sel:IsIncapacitated() then
-		local next_merc = Living(st)[1]
+	if IsKindOf(sel, "Unit") and st.it:IsInterrupter(sel) and not st.it:CanAct(sel) then
+		local next_merc = st.it:Living()[1]
 		if next_merc then
 			Log("INT #%d %s is down, selecting %s", st.n, Name(sel), Name(next_merc))
 			SelectObj(next_merc)
@@ -419,7 +411,7 @@ function IIS.EndInterrupt(st, reason)
 	end
 	table.sort(forced)
 	local aps = {}
-	for _, m in ipairs(st.mercs) do
+	for _, m in ipairs(st.it:Interrupters()) do
 		aps[#aps + 1] = string.format("%s %s->%s", Name(m), IIS.FormatAP(st.start_ap[m]), IsValid(m) and AP(m) or "?")
 	end
 	Log("INT #%d END (%s): %dms game time, actions=%d, ap: %s, forced: %s", st.n, reason, GameTime() - st.start_time,
@@ -500,7 +492,7 @@ function IIS.TryRunQueue(st)
 	if IIS.active ~= st then return end
 	local function can_start(e)
 		local states = {}
-		for _, m in ipairs(st.mercs) do
+		for _, m in ipairs(st.it:Interrupters()) do
 			local state = m ~= e.unit and CombatActions_RunningState[m]
 			if state then
 				states[#states + 1] = state
@@ -537,7 +529,7 @@ local orig_CanBeControlled = Unit.CanBeControlled
 function Unit:CanBeControlled(...)
 	local st = IIS.active
 	if st and self.team and self.team.control == "UI" then
-		if st.is_merc[self] and IsValid(self) and not self:IsIncapacitated() then
+		if st.it:CanAct(self) then
 			Forced(st, "CanBeControlled")
 			return true
 		end
@@ -552,7 +544,7 @@ local orig_CombatActionCannotBeStarted = CombatActionCannotBeStarted
 function CombatActionCannotBeStarted(action_id, unit)
 	local st = IIS.active
 	if st and g_Combat and IsInterrupter(unit) then
-		for _, m in ipairs(st.mercs) do
+		for _, m in ipairs(st.it:Interrupters()) do
 			local state = CombatActions_RunningState[m]
 			if state and state ~= "PostAction" then
 				return true
@@ -600,7 +592,7 @@ end
 
 local function OnInterrupterActionStep(unit, what)
 	local st = IIS.active
-	if not st or not st.is_merc[unit] then return end
+	if not st or not st.it:IsInterrupter(unit) then return end
 	st.it:Activity()
 	if what == "end" then
 		Log("INT #%d merc %s action ended: ap_left=%s pos=%s status=%s | %s", st.n, Name(unit), AP(unit), Pos(unit),
@@ -647,7 +639,7 @@ function WaitOtherCombatActionsEnd(unit)
 	Log("INT #%d WaitOtherCombatActionsEnd for %s waits for the other interrupters only | %s", st.n, Name(unit), RunningStateSnapshot())
 	while IIS.active == st do
 		local wait = false
-		for _, m in ipairs(st.mercs) do
+		for _, m in ipairs(st.it:Interrupters()) do
 			if m ~= unit and CombatActions_RunningState[m] and HasCombatActionInProgress(m) then
 				wait = true
 				break
@@ -665,11 +657,11 @@ end
 local orig_OnMouseButtonDown = IModeCombatMovement.OnMouseButtonDown
 function IModeCombatMovement:OnMouseButtonDown(pt, button, obj)
 	local st = IIS.active
-	if not st or not g_Teams or not st.top.team then
+	if not st or not g_Teams or not st.it:Top().team then
 		return orig_OnMouseButtonDown(self, pt, button, obj)
 	end
 	local prev = g_CurrentTeam
-	local player_idx = table.find(g_Teams, st.top.team)
+	local player_idx = table.find(g_Teams, st.it:Top().team)
 	IIS.Verbose("INT #%d click %s on %s: g_CurrentTeam %s -> %s during the handler", st.n, tostring(button),
 		obj and Name(obj) or "ground", tostring(prev), tostring(player_idx))
 	g_CurrentTeam = player_idx
@@ -695,7 +687,7 @@ function NetSyncEvents.EndTurn(player_id, ...)
 			end
 		elseif press == "forced" then
 			SafeCall(st, "DumpStuck", IIS.DumpStuck, st, "End Turn pressed again while a merc is busy")
-			for _, m in ipairs(Living(st)) do
+			for _, m in ipairs(st.it:Living()) do
 				if not m:IsIdleCommand() then
 					Log("INT #%d sending merc %s to Idle (was %s)", st.n, Name(m), tostring(m.command))
 					m:SetCommand("Idle")
@@ -726,11 +718,11 @@ function OnMsg.SelectionChange()
 	local st = IIS.active
 	if not st then return end
 	local sel = SelectedObj
-	if IsKindOf(sel, "Unit") and sel.team and sel.team.control == "UI" and not st.is_merc[sel] then
+	if IsKindOf(sel, "Unit") and sel.team and sel.team.control == "UI" and not st.it:IsInterrupter(sel) then
 		CreateRealTimeThread(function()
 			if IIS.active ~= st then return end
-			local m = Living(st)[1]
-			if m and SelectedObj ~= m and not st.is_merc[SelectedObj] then
+			local m = st.it:Living()[1]
+			if m and SelectedObj ~= m and not st.it:IsInterrupter(SelectedObj) then
 				Log("INT #%d %s is not an interrupter, selecting %s", st.n, Name(sel), Name(m))
 				SelectObj(m)
 			end
