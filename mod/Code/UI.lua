@@ -1,6 +1,5 @@
--- Improved Interrupt System UI: the interrupt banner, the portrait marks, the End Turn label,
--- the camera and the sounds. Control.lua calls UI.Begin, UI.Refresh and UI.End; each call runs
--- under pcall there.
+-- Improved Interrupt System UI: the interrupt banner, the portrait marks, the camera and the
+-- sounds. Control.lua calls UI.Begin, UI.Refresh and UI.End; each call runs under pcall there.
 
 IIS.UI = IIS.UI or {}
 local UI = IIS.UI
@@ -51,7 +50,6 @@ function UI.EnsureBannerPreset()
 		SortKey = banner_sort_key,
 		style = "yellow",
 		text = Untranslated("INTERRUPT!"),
-		secondaryText = Untranslated("<names> can act. <mover> waits.<newline><hint>"),
 	})
 	group = Presets.TacticalNotification and Presets.TacticalNotification.Default
 	local ok = group and group[banner_id] and true or false
@@ -59,25 +57,11 @@ function UI.EnsureBannerPreset()
 	return ok
 end
 
-local function BannerHint(st)
-	if st.end_requested then
-		return "Ending the interrupt when the current action is done."
-	end
-	return "Only they can be selected. End Turn resumes the enemy turn."
-end
-
 function UI.ShowBanner(st)
 	if not UI.EnsureBannerPreset() then
 		return
 	end
-	-- ShowTacticalNotification ignores a mode that is already shown, so a new text needs a hide first.
-	HideTacticalNotification(banner_id, true)
-	local living = IIS.LivingInterrupters(st)
-	ShowTacticalNotification(banner_id, true, nil, {
-		names = NamesText(#living > 0 and living or st.mercs),
-		mover = DisplayName(st.mover),
-		hint = BannerHint(st),
-	})
+	ShowTacticalNotification(banner_id, true)
 	st.banner_shown = true
 end
 
@@ -197,78 +181,6 @@ function UI.RefreshPortraits()
 end
 
 ------------------------------------------------------------------------------------------------
--- End Turn button
-
-local function EndTurnLabel(st)
-	return st.end_requested and "ENDING..." or "END INTERRUPT"
-end
-
-local function WrapEndTurnUpdate(orig)
-	return function(self, context, ...)
-		local result
-		if orig then
-			result = orig(self, context, ...)
-		end
-		local st = IIS.active
-		if st and self.idLargeText then
-			self.idLargeText:SetText(Untranslated(EndTurnLabel(st)))
-		end
-		return result
-	end
-end
-
-local function FindTemplateNode(node, id)
-	if type(node) ~= "table" then
-		return
-	end
-	if node.Id == id then
-		return node
-	end
-	for _, child in ipairs(node) do
-		local found = FindTemplateNode(child, id)
-		if found then
-			return found
-		end
-	end
-end
-
--- The idTurn button of XTemplates.IModeCombatMovement sets "END TURN" in its OnContextUpdate.
--- New HUDs copy the wrapped function from the template node.
-function UI.PatchEndTurnTemplate()
-	local template = rawget(_G, "XTemplates") and XTemplates.IModeCombatMovement
-	local node = template and FindTemplateNode(template, "idTurn")
-	if not node then
-		Log("UI: idTurn not found in XTemplates.IModeCombatMovement, the End Turn label stays vanilla")
-		return false
-	end
-	if not node.iis_patched then
-		node.OnContextUpdate = WrapEndTurnUpdate(node.OnContextUpdate)
-		node.iis_patched = true
-		Log("UI: End Turn button template patched")
-	end
-	UI.end_turn_node = node
-	return true
-end
-
--- A HUD that was open before the template patch keeps the old function, so its button gets the
--- same wrapper.
-local function LiveEndTurnButton()
-	local dlg = GetInGameInterfaceModeDlg()
-	local frame = dlg and rawget(dlg, "idEndTurnFrame")
-	return frame and rawget(frame, "idTurn")
-end
-
-function UI.RefreshEndTurnButton()
-	local button = LiveEndTurnButton()
-	if button and not button.iis_patched then
-		button.OnContextUpdate = WrapEndTurnUpdate(button.OnContextUpdate)
-		button.iis_patched = true
-	end
-	ObjModified(Selection)
-	return button and true or false
-end
-
-------------------------------------------------------------------------------------------------
 -- Camera
 
 local camera_midpoint_tiles = 20
@@ -293,15 +205,10 @@ end
 
 function UI.Begin(st)
 	local safe = IIS.SafeCall
-	safe(st, "UI patch", UI.PatchEndTurnTemplate)
 	safe(st, "UI banner", UI.ShowBanner, st)
 	local portraits = 0
 	safe(st, "UI portraits", function()
 		portraits = UI.RefreshPortraits()
-	end)
-	local live_button = false
-	safe(st, "UI end turn", function()
-		live_button = UI.RefreshEndTurnButton()
 	end)
 	local camera = "?"
 	safe(st, "UI camera", function()
@@ -318,8 +225,8 @@ function UI.Begin(st)
 		CombatLog("important", T{Untranslated("<names> interrupt <mover>! End Turn resumes the enemy turn."),
 			names = NamesText(st.mercs), mover = st.mover:GetLogName()})
 	end)
-	Log("INT #%d UI shown: banner=%s portraits_refreshed=%d end_turn_button=%s camera=%s", st.n, tostring(not not st.banner_shown),
-		portraits, live_button and "live" or "not found", tostring(camera))
+	Log("INT #%d UI shown: banner=%s portraits_refreshed=%d camera=%s", st.n, tostring(not not st.banner_shown),
+		portraits, tostring(camera))
 end
 
 -- Called when an action ends, a merc goes down or End Turn is pressed.
@@ -330,15 +237,13 @@ function UI.Refresh(st)
 	local safe = IIS.SafeCall
 	safe(st, "UI banner", UI.ShowBanner, st)
 	safe(st, "UI portraits", UI.RefreshPortraits)
-	safe(st, "UI end turn", UI.RefreshEndTurnButton)
 end
 
 function UI.End(st, reason)
 	local safe = IIS.SafeCall
 	safe(st, "UI banner", UI.HideBanner)
-	-- IIS.active is already false here, so the portraits and the button go back to vanilla.
+	-- IIS.active is already false here, so the portraits go back to vanilla.
 	safe(st, "UI portraits", UI.RefreshPortraits)
-	safe(st, "UI end turn", UI.RefreshEndTurnButton)
 	safe(st, "UI sound", PlayFX, "PlayerCombatTurnEnd", "start")
 	safe(st, "UI combat log", function()
 		CombatLog("important", T{Untranslated("Interrupt over (<reason>). The enemy turn continues."), reason = reason})
@@ -351,19 +256,14 @@ function UI.HookStatus()
 	if HUDMercClass.SetupStyle ~= UI.setup_style_hook then
 		replaced[#replaced + 1] = "SetupStyle"
 	end
-	if UI.end_turn_node and UI.end_turn_node.iis_patched ~= true then
-		replaced[#replaced + 1] = "EndTurnButton"
-	end
 	return "ui_hooks=" .. (#replaced == 0 and "ours" or ("REPLACED:" .. table.concat(replaced, ",")))
 end
 
 function OnMsg.ModsReloaded()
-	IIS.SafeCall(nil, "UI patch", UI.PatchEndTurnTemplate)
 	IIS.SafeCall(nil, "UI preset", UI.EnsureBannerPreset)
 	IIS.SafeCall(nil, "attack trace", IIS.HookAttackTrace)
 	IIS.SafeCall(nil, "mod list", IIS.LogLoadedMods)
 	Log("ModsReloaded: IIS %s active, %s", IIS.version, IIS.HookStatus())
 end
 
-IIS.SafeCall(nil, "UI patch", UI.PatchEndTurnTemplate)
 Log("UI loaded: %s", UI.HookStatus())

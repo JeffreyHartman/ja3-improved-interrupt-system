@@ -28,7 +28,6 @@ local function Living(st)
 	end
 	return list
 end
-IIS.LivingInterrupters = Living
 
 -- An error in code that runs in the frozen enemy's command thread ends the enemy's command, so
 -- everything that is not the wait itself runs under pcall.
