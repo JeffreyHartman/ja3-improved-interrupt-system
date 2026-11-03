@@ -6,6 +6,7 @@
 |---|---|
 | `mod/Code/Rules.lua` | The 1.13 formulas. It makes no engine calls. |
 | `mod/Code/Memory.lua` | The Watcher memory (counters, Seen this turn, Seen before) and the move plans. It makes no engine calls. |
+| `mod/Code/Interrupt.lua` | The interrupters, activity, the stuck timer, the End Turn presses and the end decision of the active interrupt. It makes no engine calls. |
 | `mod/Code/IIS.lua` | Settings, log and trigger checks. `IIS.E` holds every engine read, so the tests can replace it. |
 | `mod/Code/Control.lua` | Runs an interrupt and gives control to the interrupters. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
@@ -33,7 +34,8 @@ Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
 
 - `tests/test_rules.lua` checks the formulas against worked examples from the 1.13 source code.
 - `tests/test_memory.lua` checks `IISMemory` with a plain store table.
-- `tests/test_engine.lua` loads `IIS.lua` and `Control.lua` with fake engine functions and the real `IISMemory`.
+- `tests/test_interrupt.lua` checks `IISInterrupt` with a fake clock and plain units.
+- `tests/test_engine.lua` loads `IIS.lua` and `Control.lua` with fake engine functions and the real `IISMemory` and `IISInterrupt`.
 
 The tests do not cover `UI.lua` or anything that needs the game.
 

@@ -95,18 +95,15 @@ local function MercBusy(m)
 	return IsValid(m) and not m:IsIncapacitated() and (HasCombatActionInProgress(m) or not m:IsIdleCommand())
 end
 
-local function AnyBusy(st)
-	if #st.queue > 0 then
-		return true
-	end
-	for _, m in ipairs(st.mercs) do
-		if MercBusy(m) then
-			return true
-		end
-	end
-	return false
-end
-IIS.AnyBusy = AnyBusy
+IISInterrupt.Setup{
+	now = function() return GameTime() end,
+	in_combat = function() return not not g_Combat end,
+	alive = function(u) return IsValid(u) and not u:IsDead() end,
+	can_act = function(u) return IsValid(u) and not u:IsIncapacitated() end,
+	busy = MercBusy,
+	ap_raw = function(u) return E.APRaw(u) end,
+	walk_ap = function() return E.WalkRaw() end,
+}
 
 function IIS.DumpStuck(st, why)
 	local mover = st.mover
@@ -120,31 +117,6 @@ function IIS.DumpStuck(st, why)
 				Log("INT #%d     %s", st.n, line)
 			end
 		end
-	end
-end
-
--- No interrupter can take one step, so nothing is left to do.
-local function OutOfAP(st)
-	local walk = E.WalkRaw()
-	for _, m in ipairs(Living(st)) do
-		if E.APRaw(m) >= walk then
-			return false
-		end
-	end
-	return true
-end
-
-local function StopReason(st)
-	local cfg = IIS.Config
-	if not g_Combat then return "combat ended" end
-	if not IsValid(st.mover) or st.mover:IsDead() then return "enemy dead" end
-	if #Living(st) == 0 then return "all interrupters are down" end
-	if st.force_end then return "forced: End Turn pressed again while a merc was busy" end
-	local busy = AnyBusy(st)
-	if st.end_requested and not busy then return "player ended the interrupt" end
-	if cfg.auto_end and st.actions > 0 and not busy and OutOfAP(st)
-		and GameTime() - st.last_activity >= cfg.auto_end_delay_ms then
-		return "interrupters are out of AP (auto end)"
 	end
 end
 
@@ -287,6 +259,10 @@ function IIS.RunInterrupt(mover, info, dummy)
 	IIS.interrupt_count = IIS.interrupt_count + 1
 	local n = IIS.interrupt_count
 
+	local winners = {}
+	for i, m in ipairs(mercs) do
+		winners[i] = m
+	end
 	local joined = {}
 	if info.system == "IIS" and cfg.collective then
 		SafeCall(nil, "collective", function()
@@ -311,13 +287,11 @@ function IIS.RunInterrupt(mover, info, dummy)
 		dummy = dummy,
 		start_time = GameTime(),
 		start_ap = {},
-		end_requested = false,
-		force_end = false,
 		queue = {},
-		actions = 0,
 		forced = {},
-		last_activity = GameTime(),
 	}
+	st.it = IISInterrupt.Begin{ n = n, mover = mover, winners = winners, joiners = joined, system = info.system,
+		kind = info.kind, cfg = cfg, queue = st.queue }
 	for _, m in ipairs(mercs) do
 		st.is_merc[m] = true
 		st.start_ap[m] = E.APRaw(m)
@@ -353,9 +327,9 @@ function IIS.RunInterrupt(mover, info, dummy)
 
 	local elapsed, next_heartbeat = 0, cfg.heartbeat_ms
 	while IIS.active == st do
-		local ok, reason = SafeCall(st, "StopReason", StopReason, st)
+		local ok, reason = SafeCall(st, "EndReason", st.it.EndReason, st.it)
 		if not ok then
-			reason = "error in StopReason"
+			reason = "error in EndReason"
 		end
 		if reason then
 			IIS.EndInterrupt(st, reason)
@@ -372,7 +346,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 					aps[#aps + 1] = string.format("%s=%s%s", Name(m), AP(m), MercBusy(m) and "(busy)" or "")
 				end
 				local line = string.format("%s queue=%d end_requested=%s | %s | %s", table.concat(aps, " "), #st.queue,
-					tostring(st.end_requested), UIState(st), RunningStateSnapshot())
+					tostring(st.it:EndRequested()), UIState(st), RunningStateSnapshot())
 				if line ~= st.wait_line or elapsed - st.wait_logged >= cfg.heartbeat_repeat_ms then
 					st.wait_line, st.wait_logged = line, elapsed
 					Log("INT #%d waiting +%ss: %s", st.n, tostring(elapsed / 1000), line)
@@ -390,16 +364,8 @@ end
 
 -- Runs every 100 ms of game time during an interrupt.
 function IIS.Tick(st, elapsed)
-	local cfg = IIS.Config
-	if AnyBusy(st) then
-		st.last_activity = GameTime()
-		st.busy_ms = (st.busy_ms or 0) + 100
-		if st.busy_ms >= (st.next_dump_ms or cfg.stuck_ms) then
-			st.next_dump_ms = st.busy_ms + 10000
-			IIS.DumpStuck(st, string.format("a merc is busy for %sms", tostring(st.busy_ms)))
-		end
-	else
-		st.busy_ms, st.next_dump_ms = 0, nil
+	if st.it:Tick(100) then
+		IIS.DumpStuck(st, string.format("a merc is busy for %sms", tostring(st.it:BusyMs())))
 	end
 	-- An interrupter that goes down must not stay selected.
 	local sel = SelectedObj
@@ -459,7 +425,7 @@ function IIS.EndInterrupt(st, reason)
 		aps[#aps + 1] = string.format("%s %s->%s", Name(m), IIS.FormatAP(st.start_ap[m]), IsValid(m) and AP(m) or "?")
 	end
 	Log("INT #%d END (%s): %dms game time, actions=%d, ap: %s, forced: %s", st.n, reason, GameTime() - st.start_time,
-		st.actions, table.concat(aps, ", "), #forced > 0 and table.concat(forced, " ") or "(none)")
+		st.it:Actions(), table.concat(aps, ", "), #forced > 0 and table.concat(forced, " ") or "(none)")
 	SafeCall(st, "after log", function()
 		Log("INT #%d after end: %s | %s", st.n, UIState(st), RunningStateSnapshot())
 	end)
@@ -523,9 +489,8 @@ function IIS.RunMercAction(st, action_id, unit, ap, ...)
 		Log("INT #%d action %s not run: interrupt already ended", st.n, tostring(action_id))
 		return
 	end
-	st.actions = st.actions + 1
-	st.last_activity = GameTime()
-	Log("INT #%d run action #%d %s merc=%s cost=%s ap_left=%s | %s", st.n, st.actions, tostring(action_id), Name(unit),
+	local count = st.it:ActionStarted()
+	Log("INT #%d run action #%d %s merc=%s cost=%s ap_left=%s | %s", st.n, count, tostring(action_id), Name(unit),
 		IIS.FormatAP(ap), AP(unit), RunningStateSnapshot())
 	g_Combat:SetActiveUnit(unit)
 	RunCombatAction(action_id, unit, ap, ...)
@@ -636,7 +601,7 @@ function StartCombatAction(action_id, unit, ap, ...)
 	end
 	unit:ConsumeAP(ap, action_id, ...)
 	table.insert(st.queue, pack_params(action_id, unit, ap, ...))
-	st.last_activity = GameTime()
+	st.it:Activity()
 	IIS.TryRunQueue(st)
 	if #st.queue > 0 then
 		Log("INT #%d queued %s: %d waiting | %s", st.n, tostring(action_id), #st.queue, RunningStateSnapshot())
@@ -646,7 +611,7 @@ end
 local function OnInterrupterActionStep(unit, what)
 	local st = IIS.active
 	if not st or not st.is_merc[unit] then return end
-	st.last_activity = GameTime()
+	st.it:Activity()
 	if what == "end" then
 		Log("INT #%d merc %s action ended: ap_left=%s pos=%s status=%s | %s", st.n, Name(unit), AP(unit), Pos(unit),
 			IIS.StatusList(unit), RunningStateSnapshot())
@@ -731,15 +696,15 @@ local orig_EndTurn = NetSyncEvents.EndTurn
 function NetSyncEvents.EndTurn(player_id, ...)
 	local st = IIS.active
 	if st and player_id == netUniqueId then
-		if not st.end_requested then
-			st.end_requested = true
-			Log("INT #%d end requested (End Turn). busy=%s", st.n, tostring(AnyBusy(st)))
-			if AnyBusy(st) then
+		local press = st.it:EndTurnPressed()
+		if press == "requested" then
+			local busy = st.it:Busy()
+			Log("INT #%d end requested (End Turn). busy=%s", st.n, tostring(busy))
+			if busy then
 				SafeCall(st, "UI.Refresh", IIS.UI.Refresh, st)
 			end
-		elseif AnyBusy(st) and not st.force_end then
+		elseif press == "forced" then
 			SafeCall(st, "DumpStuck", IIS.DumpStuck, st, "End Turn pressed again while a merc is busy")
-			st.force_end = true
 			for _, m in ipairs(Living(st)) do
 				if not m:IsIdleCommand() then
 					Log("INT #%d sending merc %s to Idle (was %s)", st.n, Name(m), tostring(m.command))

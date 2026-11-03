@@ -1,6 +1,6 @@
 -- Tests for the game-side logic in mod/Code/IIS.lua and mod/Code/Control.lua. They load the
 -- real files with fake engine globals, then replace IIS.E (the engine reads) with fakes. They
--- use the real IISMemory module.
+-- use the real IISMemory and IISInterrupt modules.
 -- They do not cover UI.lua or anything that needs a running game.
 
 local t = Test
@@ -103,6 +103,7 @@ function point_pack(p)
 end
 
 function ObjModified() end
+function IsValidThread() return false end
 function IsSetpiecePlaying() return false end
 
 CombatActions_RunningState = {}
@@ -590,11 +591,13 @@ end)
 -- Control overrides
 
 local function ActiveState(mercs, mover)
-	local st = { n = 1, mover = mover, mercs = mercs, is_merc = {}, top = mercs[1], queue = {}, actions = 0,
-		forced = {}, last_activity = 0, start_ap = {}, end_requested = false, force_end = false }
+	local st = { n = 1, mover = mover, mercs = mercs, is_merc = {}, top = mercs[1], queue = {}, forced = {},
+		start_ap = {} }
 	for _, m in ipairs(mercs) do
 		st.is_merc[m] = true
 	end
+	st.it = IISInterrupt.Begin{ n = 1, mover = mover, winners = mercs, joiners = {}, system = "IIS", kind = "move",
+		cfg = Q.Config, queue = st.queue }
 	Q.active = st
 	return st
 end
@@ -682,13 +685,17 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	local a = FakeUnit({ id = "a", command = "FirearmAttack" })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
 	local st = ActiveState({ a }, enemy)
-	Q.UI = { Refresh = function() end }
+	local refreshed = 0
+	Q.UI = { Refresh = function() refreshed = refreshed + 1 end }
 	NetSyncEvents.EndTurn(netUniqueId)
-	t.eq(st.end_requested, true)
-	t.eq(st.force_end, false)
+	t.eq(LogHas("end requested %(End Turn%)%. busy=true"), true)
+	t.eq(refreshed, 1)
+	t.eq(st.it:EndReason(), nil)
+	t.eq(a.command, "FirearmAttack")
 	NetSyncEvents.EndTurn(netUniqueId)
-	t.eq(st.force_end, true)
+	t.eq(LogHas("STUCK%? End Turn pressed again while a merc is busy"), true)
 	t.eq(a.command, "Idle")
+	t.eq(st.it:EndReason(), "forced: End Turn pressed again while a merc was busy")
 	Q.active = false
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
