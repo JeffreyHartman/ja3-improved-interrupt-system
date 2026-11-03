@@ -10,6 +10,7 @@ return PlaceObj('ModDef', {
 	'saved_with_revision', 366685,
 	'code', {
 		"Code/Rules.lua",
+		"Code/Memory.lua",
 		"Code/IIS.lua",
 		"Code/Control.lua",
 		"Code/UI.lua",

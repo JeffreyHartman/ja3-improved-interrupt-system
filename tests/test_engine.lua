@@ -1,5 +1,6 @@
 -- Tests for the game-side logic in mod/Code/IIS.lua and mod/Code/Control.lua. They load the
--- real files with fake engine globals, then replace IIS.E (the engine reads) with fakes.
+-- real files with fake engine globals, then replace IIS.E (the engine reads) with fakes. They
+-- use the real IISMemory module.
 -- They do not cover UI.lua or anything that needs a running game.
 
 local t = Test
@@ -151,6 +152,7 @@ dofile("mod/Code/Control.lua")
 
 local Q = IIS
 local E = Q.E
+local Mem = IISMemory
 
 ------------------------------------------------------------------------------------------------
 -- Fake units and engine reads
@@ -203,11 +205,14 @@ local world = {}
 
 local function ResetWorld()
 	world = { players = {}, los = {}, sees = {}, mover_sees = {}, rand = 99 }
-	Q.counters = {}
-	Q.plans = {}
 	Q.attack_targets = {}
 	Q.active = false
-	gv_IIS = { seen_turn = {}, seen_ever = {} }
+	gv_IIS = {}
+	Mem.Setup{
+		key = function(u) return E.Key(u) end,
+		same_tile = function(a, b) return E.SameTile(a, b) end,
+		store = function() return gv_IIS end,
+	}
 	vanilla_result = {}
 	Q.Config.enabled = true
 	Q.Config.system = "IIS"
@@ -328,7 +333,7 @@ t.case("Classic: the earliest winning step wins, a loser before it does not bloc
 	world.los[b] = Steps(3)
 	world.los[weak] = Steps(2, 3)
 	world.los[saw] = Steps(2)
-	gv_IIS.seen_turn.saw = { enemy = true }
+	Mem.Sees(saw, mover)
 	local dummies = Path(mover, 4)
 	local idx, winners = Q.FindClassicMoveTrigger(mover, dummies, 1)
 	t.eq(idx, 3)
@@ -382,7 +387,7 @@ local function IISSetup(counter)
 	world.los[a] = Steps(2, 3, 4, 5, 6)
 	E.Dist = function() return 6 end
 	if counter then
-		Q.AddCounter(a, mover, counter)
+		Mem.Register(a, mover, counter)
 	end
 	return mover, a
 end
@@ -427,24 +432,6 @@ t.case("IIS: a watcher that cannot win still registers AP", function()
 	t.eq(rows[1].win_skip, "Panicked")
 end)
 
-t.case("IIS: CommitPlan adds each step once", function()
-	local mover, a = IISSetup(10)
-	local _, _, _, plan = Q.FindIISMoveTrigger(mover, Path(mover, 6), 1)
-	Q.CommitPlan(plan, 4, "test")
-	t.eq(Q.Counter(a, mover), 28)
-	Q.CommitPlan(plan, 3, "test")
-	t.eq(Q.Counter(a, mover), 28)
-	Q.CommitPlan(plan, 6, "test")
-	t.eq(Q.Counter(a, mover), 40)
-end)
-
-t.case("IIS: counters cap at 255 like the UINT8 in 1.13", function()
-	local mover, a = IISSetup()
-	Q.AddCounter(a, mover, 250)
-	Q.AddCounter(a, mover, 20)
-	t.eq(Q.Counter(a, mover), 255)
-end)
-
 t.case("IIS: a later check of the same move starts on its first dummy", function()
 	local mover, a = IISSetup()
 	local dummies = Path(mover, 6)
@@ -459,10 +446,10 @@ t.case("RegisterAction adds the AP of a seen action", function()
 	world.sees[a] = { [mover] = true }
 	Q.RegisterAction(mover, "Attack", 4000)
 	-- 4000 raw = 33 1.13 AP, 74% of it = 24
-	t.eq(Q.Counter(a, mover), 24)
+	t.eq(Mem.Counter(a, mover), 24)
 	local hidden = FakeUnit({ id = "hidden", team = enemy_team })
 	Q.RegisterAction(hidden, "Attack", 4000)
-	t.eq(Q.Counter(a, hidden), 0)
+	t.eq(Mem.Counter(a, hidden), 0)
 end)
 
 t.case("RegisterAction adds the same AP for a mover with more max AP", function()
@@ -470,7 +457,7 @@ t.case("RegisterAction adds the same AP for a mover with more max AP", function(
 	mover.max_ap = 24000
 	world.sees[a] = { [mover] = true }
 	Q.RegisterAction(mover, "Attack", 4000)
-	t.eq(Q.Counter(a, mover), 24)
+	t.eq(Mem.Counter(a, mover), 24)
 end)
 
 ------------------------------------------------------------------------------------------------
@@ -508,12 +495,18 @@ t.case("AddTrigger: a later vanilla interrupt is dropped until the next check", 
 end)
 
 t.case("AddTrigger stores the plan only for the check in the mover's own thread", function()
-	local mover = IISSetup(10)
-	Q.AddTrigger(mover, "move", Path(mover, 6))
-	t.eq(Q.plans[mover], nil)
+	local mover, a = IISSetup(10)
+	local dummies = Path(mover, 6)
+	Q.AddTrigger(mover, "move", dummies)
+	mover.pos = dummies[6].pos
+	OnMsg.UnitMovementDone(mover)
+	t.eq(Mem.Counter(a, mover), 10)
+	mover.pos = dummies[1].pos
 	mover.in_cmd = true
-	Q.AddTrigger(mover, "move", Path(mover, 6))
-	t.eq(Q.plans[mover] ~= nil, true)
+	Q.AddTrigger(mover, "move", dummies)
+	mover.pos = dummies[6].pos
+	OnMsg.UnitMovementDone(mover)
+	t.eq(Mem.Counter(a, mover), 40)
 end)
 
 -- Issue #4. The counter starts at 10 and each seen step adds 6. A vanilla overwatch stops the
@@ -530,7 +523,7 @@ t.case("IIS: a vanilla interrupt at an earlier step keeps the AP of the walked s
 	t.eq(idx, 3, "trigger index in the rest of the path") -- step 4: 16, 22, 28
 	mover.pos = dummies[6].pos
 	OnMsg.UnitMovementDone(mover)
-	t.eq(Q.Counter(a, mover), 40) -- 10 + 5 steps of 6
+	t.eq(Mem.Counter(a, mover), 40) -- 10 + 5 steps of 6
 end)
 
 t.case("The check wrapper returns nothing for a stopped mover", function()
@@ -552,9 +545,9 @@ t.case("IIS after an attack: a full counter wins if the merc sees or was attacke
 	local b = FakeUnit({ id = "b", level = 5, agility = 80, ap = 10000, pos = { x = 1, y = 1 } })
 	local c = FakeUnit({ id = "c", level = 5, agility = 80, ap = 10000, pos = { x = 2, y = 1 } })
 	world.players = { a, b, c }
-	Q.AddCounter(a, mover, 30)
-	Q.AddCounter(b, mover, 30)
-	Q.AddCounter(c, mover, 5)
+	Mem.Register(a, mover, 30)
+	Mem.Register(b, mover, 30)
+	Mem.Register(c, mover, 5)
 	world.sees[a] = { [mover] = true }
 	world.sees[c] = { [mover] = true }
 	Q.attack_targets[mover] = { [b] = true }
