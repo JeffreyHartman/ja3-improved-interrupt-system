@@ -51,6 +51,19 @@ _Avoid_: count
 **Reaction time**:
 The value that a watcher's counter must reach for the watcher to win.
 
+### Memory
+
+**Watcher memory**:
+What a unit remembers about each enemy unit during a combat: its counter, and whether it saw that unit this turn or before. Every unit in combat has one, on both sides.
+
+**Seen this turn**:
+A unit saw an enemy unit after the start of its own last turn. Classic does not let a watcher duel a mover that it saw this turn.
+_Avoid_: seen_turn
+
+**Seen before**:
+A unit saw an enemy unit at some time in the current combat. In Classic, it gives a point in a duel.
+_Avoid_: seen ever, saw before
+
 ### Action points
 
 **Raw AP**:
