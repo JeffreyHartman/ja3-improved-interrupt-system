@@ -57,12 +57,13 @@ function UI.EnsureBannerPreset()
 	return ok
 end
 
-function UI.ShowBanner(st)
+-- Returns true when the banner shows.
+function UI.ShowBanner()
 	if not UI.EnsureBannerPreset() then
-		return
+		return false
 	end
 	ShowTacticalNotification(banner_id, true)
-	st.banner_shown = true
+	return true
 end
 
 function UI.HideBanner()
@@ -74,11 +75,11 @@ end
 
 -- "interrupter", "locked" or nil for a portrait context.
 function UI.PortraitMark(unit)
-	local st = IIS.active
-	if not st or not IsKindOf(unit, "Unit") or not unit.team or unit.team.control ~= "UI" or unit:IsDead() then
+	local it = IIS.active
+	if not it or not IsKindOf(unit, "Unit") or not unit.team or unit.team.control ~= "UI" or unit:IsDead() then
 		return
 	end
-	if st.is_merc[unit] and not unit:IsIncapacitated() then
+	if it:CanAct(unit) then
 		return "interrupter"
 	end
 	return "locked"
@@ -185,11 +186,11 @@ end
 
 local camera_midpoint_tiles = 20
 
-function UI.FocusCamera(st)
+function UI.FocusCamera(it)
 	if CurrentActionCamera then
 		return "action camera playing"
 	end
-	local merc, mover = st.top, st.mover
+	local merc, mover = it:Top(), it:Mover()
 	local target = merc:GetVisualPos()
 	local how = "merc"
 	if IsValid(mover) and merc:GetDist(mover) <= camera_midpoint_tiles * const.SlabSizeX then
@@ -203,52 +204,68 @@ end
 ------------------------------------------------------------------------------------------------
 -- Calls from Control.lua
 
-function UI.Begin(st)
+function UI.Begin(it)
 	local safe = IIS.SafeCall
-	safe(st, "UI banner", UI.ShowBanner, st)
+	local banner_shown = false
+	safe(it, "UI banner", function()
+		banner_shown = UI.ShowBanner()
+	end)
 	local portraits = 0
-	safe(st, "UI portraits", function()
+	safe(it, "UI portraits", function()
 		portraits = UI.RefreshPortraits()
 	end)
 	local camera = "?"
-	safe(st, "UI camera", function()
-		camera = UI.FocusCamera(st)
+	safe(it, "UI camera", function()
+		camera = UI.FocusCamera(it)
 	end)
-	safe(st, "UI sound", PlayFX, "PlayerCombatTurnStart", "start")
-	safe(st, "UI floating text", function()
-		for _, m in ipairs(st.mercs) do
+	safe(it, "UI sound", PlayFX, "PlayerCombatTurnStart", "start")
+	safe(it, "UI floating text", function()
+		for _, m in ipairs(it:Interrupters()) do
 			CreateFloatingText(m, Untranslated("INTERRUPT!"), "FloatingTextMiss")
 		end
-		CreateFloatingText(st.mover, Untranslated("Interrupted"), "FloatingTextMiss")
+		CreateFloatingText(it:Mover(), Untranslated("Interrupted"), "FloatingTextMiss")
 	end)
-	safe(st, "UI combat log", function()
+	safe(it, "UI combat log", function()
 		CombatLog("important", T{Untranslated("<names> interrupt <mover>! End Turn resumes the enemy turn."),
-			names = NamesText(st.mercs), mover = st.mover:GetLogName()})
+			names = NamesText(it:Interrupters()), mover = it:Mover():GetLogName()})
 	end)
-	Log("INT #%d UI shown: banner=%s portraits_refreshed=%d camera=%s", st.n, tostring(not not st.banner_shown),
+	Log("INT #%d UI shown: banner=%s portraits_refreshed=%d camera=%s", it:Number(), tostring(banner_shown),
 		portraits, tostring(camera))
 end
 
 -- Called when an action ends, a merc goes down or End Turn is pressed.
-function UI.Refresh(st)
-	if IIS.active ~= st then
+function UI.Refresh(it)
+	if IIS.active ~= it then
 		return
 	end
 	local safe = IIS.SafeCall
-	safe(st, "UI banner", UI.ShowBanner, st)
-	safe(st, "UI portraits", UI.RefreshPortraits)
+	safe(it, "UI banner", UI.ShowBanner)
+	safe(it, "UI portraits", UI.RefreshPortraits)
 end
 
-function UI.End(st, reason)
+-- The combat log text for each end reason code from IISInterrupt:EndReason and Control.lua.
+local end_reason_text = {
+	combat_ended = "combat ended",
+	mover_dead = "enemy dead",
+	interrupters_down = "all interrupters are down",
+	forced_end = "forced: End Turn pressed again while a merc was busy",
+	end_request = "player ended the interrupt",
+	auto_end = "interrupters are out of AP (auto end)",
+	end_check_error = "error in EndReason",
+	mover_command_ended = "enemy command ended (destructor)",
+}
+
+function UI.End(it, reason)
 	local safe = IIS.SafeCall
-	safe(st, "UI banner", UI.HideBanner)
+	safe(it, "UI banner", UI.HideBanner)
 	-- IIS.active is already false here, so the portraits go back to vanilla.
-	safe(st, "UI portraits", UI.RefreshPortraits)
-	safe(st, "UI sound", PlayFX, "PlayerCombatTurnEnd", "start")
-	safe(st, "UI combat log", function()
-		CombatLog("important", T{Untranslated("Interrupt over (<reason>). The enemy turn continues."), reason = reason})
+	safe(it, "UI portraits", UI.RefreshPortraits)
+	safe(it, "UI sound", PlayFX, "PlayerCombatTurnEnd", "start")
+	safe(it, "UI combat log", function()
+		CombatLog("important", T{Untranslated("Interrupt over (<reason>). The enemy turn continues."),
+			reason = end_reason_text[reason] or reason})
 	end)
-	Log("INT #%d UI cleared", st.n)
+	Log("INT #%d UI cleared", it:Number())
 end
 
 function UI.HookStatus()

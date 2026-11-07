@@ -39,6 +39,24 @@ _Avoid_: merc (as a role)
 **Merc**:
 A player unit. The word says nothing about the unit's role in an interrupt.
 
+### Interrupt
+
+**Interrupt**:
+A pause in a mover's action in which the interrupters act. The mover's action continues when the interrupt ends.
+_Avoid_: interrupt turn
+
+**End request**:
+The first End Turn press in an interrupt. The interrupt ends when no interrupter is busy.
+_Avoid_: end_requested, player end
+
+**Forced end**:
+A second End Turn press while an interrupter is busy. The busy interrupters stop their actions, and the interrupt ends at once.
+_Avoid_: force_end
+
+**Auto end**:
+The end of an interrupt when no interrupter has the AP for one step and no interrupter acted for a short time.
+_Avoid_: out of AP end
+
 ### IIS counting
 
 **Registered AP**:
@@ -76,7 +94,7 @@ The AP value that JA3 stores for a unit or a cost. It stays the same with GBO 4,
 The AP that vanilla JA3 shows. One vanilla AP is 1000 raw AP.
 
 **Free Move AP**:
-AP that a unit gets at turn start and can spend only on moves. The unit loses the rest when it attacks or ends its turn.
+AP that a unit gets at turn start and can spend only on moves. The unit loses the rest when it attacks, ends its turn or enters an interrupt as an interrupter. The interrupt checks do not count it.
 
 **1.13 AP**:
 An AP amount on the JA2 1.13 scale, converted from JA3 AP at the same rate for every unit.

@@ -149,8 +149,9 @@ function E.IsAITurnEnemy(unit)
 	return team and team.control ~= "UI" and team.side ~= "neutral" and g_Teams[g_CurrentTeam] == team
 end
 
+-- Leaves out Free Move AP, which pays only for moves (Unit:HasAP).
 function E.APRaw(unit)
-	return unit.ActionPoints or 0
+	return Max(0, (unit.ActionPoints or 0) - (unit.free_move_ap or 0))
 end
 
 function E.MaxAPRaw(unit)

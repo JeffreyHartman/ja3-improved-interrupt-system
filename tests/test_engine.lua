@@ -1,6 +1,6 @@
 -- Tests for the game-side logic in mod/Code/IIS.lua and mod/Code/Control.lua. They load the
 -- real files with fake engine globals, then replace IIS.E (the engine reads) with fakes. They
--- use the real IISMemory module.
+-- use the real IISMemory and IISInterrupt modules.
 -- They do not cover UI.lua or anything that needs a running game.
 
 local t = Test
@@ -103,6 +103,7 @@ function point_pack(p)
 end
 
 function ObjModified() end
+function IsValidThread() return false end
 function IsSetpiecePlaying() return false end
 
 CombatActions_RunningState = {}
@@ -166,7 +167,8 @@ local function FakeUnit(o)
 		session_id = o.id,
 		handle = o.id,
 		team = o.team or player_team,
-		ActionPoints = o.ap or 10000,
+		ActionPoints = (o.ap or 10000) + (o.free_move_ap or 0),
+		free_move_ap = o.free_move_ap or 0,
 		max_ap = o.max_ap or 12000,
 		level = o.level or 5,
 		agility = o.agility or 80,
@@ -191,6 +193,13 @@ local function FakeUnit(o)
 	function u:GetPos() return self.pos end
 	function u:GainAP(n) self.ActionPoints = self.ActionPoints + n end
 	function u:ConsumeAP(n) self.ActionPoints = self.ActionPoints - (n or 0) end
+	function u:RemoveStatusEffect(id)
+		if id == "FreeMove" and self.statuses.FreeMove then
+			self.statuses.FreeMove = nil
+			self:ConsumeAP(self.free_move_ap)
+			self.free_move_ap = 0
+		end
+	end
 	function u:IsIdleCommand() return self.command == "Idle" end
 	function u:SetCommand(cmd) self.command = cmd end
 	return u
@@ -229,7 +238,6 @@ end
 E.PlayerUnits = function() return world.players end
 E.CanControlTeam = function(u) return u.team.control == "UI" end
 E.IsAITurnEnemy = function(u) return u.team.control ~= "UI" end
-E.APRaw = function(u) return u.ActionPoints end
 E.MaxAPRaw = function(u) return u.max_ap end
 E.StepRaw = function(stance) return stance == "Crouch" and 1500 or 1000 end
 E.WalkRaw = function() return 1000 end
@@ -271,6 +279,14 @@ local function Steps(...)
 	return row
 end
 
+-- Starts an interrupt with Q.Activate, as RunInterrupt does, without the engine calls around it.
+local function ActiveState(winners, mover, joiners)
+	local it = IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, joiners = joiners or {}, system = "IIS",
+		kind = "move", cfg = Q.Config }
+	Q.Activate(it)
+	return it
+end
+
 ------------------------------------------------------------------------------------------------
 -- Mover and watcher filters
 
@@ -302,6 +318,43 @@ t.case("WinSkipReason: the AP minimum does not depend on the watcher's max AP", 
 	Q.Config.require_attack_ap = false
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, max_ap = 6000 }), "Classic"), "AP below minimum")
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 500, max_ap = 24000 }), "IIS"), nil)
+end)
+
+t.case("WinSkipReason: Free Move AP does not pay for the attack or the AP minimum", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 3000, free_move_ap = 29000, attack_cost = 4000, statuses = { FreeMove = true } })
+	t.eq(Q.WinSkipReason(a, "IIS"), "AP below attack cost")
+	Q.Config.require_attack_ap = false
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "b", ap = 0, free_move_ap = 29000 }), "IIS"), "AP below minimum")
+end)
+
+t.case("IISWatcher: the AP of the reaction time leaves out Free Move AP", function()
+	ResetWorld()
+	t.eq(Q.IISWatcher(FakeUnit({ id = "a", ap = 6000, free_move_ap = 3000 })).ap, 6000)
+end)
+
+t.case("RemoveFreeMove: the interrupter loses its Free Move AP and the FreeMove status", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 29000, statuses = { FreeMove = true } })
+	t.eq(Q.RemoveFreeMove(a), 29000)
+	t.eq(a.ActionPoints, 4000)
+	t.eq(a.free_move_ap, 0)
+	t.eq(a.statuses.FreeMove, nil)
+end)
+
+t.case("RemoveFreeMove: Free Move AP without the status is also removed", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 2000 })
+	t.eq(Q.RemoveFreeMove(a), 2000)
+	t.eq(a.ActionPoints, 4000)
+	t.eq(a.free_move_ap, 0)
+end)
+
+t.case("RemoveFreeMove: a unit with no Free Move AP keeps its AP", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 4000 })
+	t.eq(Q.RemoveFreeMove(a), 0)
+	t.eq(a.ActionPoints, 4000)
 end)
 
 t.case("WinSkipReason: AP minimum, attack cost and blocking statuses", function()
@@ -562,7 +615,7 @@ end)
 t.case("After an attack: the log names the skip reason, or each watcher when nobody wins", function()
 	local mover, a = IISSetup()
 	world.sees[a] = { [mover] = true }
-	Q.active = { n = 9 }
+	ActiveState({ FakeUnit({ id = "b" }) }, FakeUnit({ id = "other", team = enemy_team }))
 	Q.AddTrigger(mover, "attack reaction", { mover })
 	t.eq(LogHas("after%-attack check by enemy.* skipped: interrupt active"), true)
 	Q.active = false
@@ -589,16 +642,6 @@ end)
 ------------------------------------------------------------------------------------------------
 -- Control overrides
 
-local function ActiveState(mercs, mover)
-	local st = { n = 1, mover = mover, mercs = mercs, is_merc = {}, top = mercs[1], queue = {}, actions = 0,
-		forced = {}, last_activity = 0, start_ap = {}, end_requested = false, force_end = false }
-	for _, m in ipairs(mercs) do
-		st.is_merc[m] = true
-	end
-	Q.active = st
-	return st
-end
-
 t.case("CanBeControlled: interrupters yes, other player units no, enemies vanilla", function()
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
@@ -613,6 +656,49 @@ t.case("CanBeControlled: interrupters yes, other player units no, enemies vanill
 	t.eq(Unit.CanBeControlled(a), false)
 	Q.active = false
 	t.eq(Unit.CanBeControlled(b), "vanilla")
+end)
+
+t.case("CanBeControlled: a collective joiner is an interrupter", function()
+	ResetWorld()
+	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
+	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	t.eq(Unit.CanBeControlled(b), true)
+	b.down = true
+	t.eq(Unit.CanBeControlled(b), false)
+end)
+
+local function FakeSelection(unit)
+	SelectedObj = unit
+	SelectObj = function(o) SelectedObj = o end
+	Q.UI = { Refresh = function() end }
+end
+
+t.case("Tick selects the next interrupter that can act when the selected one goes down", function()
+	ResetWorld()
+	local a, b, c = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "c" })
+	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	FakeSelection(a)
+	Q.Tick(it, 100)
+	t.eq(SelectedObj, a)
+	a.down, b.down = true, true
+	Q.Tick(it, 200)
+	t.eq(SelectedObj, c)
+	t.eq(LogHas("INT #1 a#a is down, selecting c#c"), true)
+end)
+
+t.case("SelectionChange selects an interrupter in place of another player unit", function()
+	ResetWorld()
+	local a, b, other = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "other" })
+	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	FakeSelection(b)
+	OnMsg.SelectionChange()
+	RunThreads()
+	t.eq(SelectedObj, b)
+	FakeSelection(other)
+	OnMsg.SelectionChange()
+	RunThreads()
+	t.eq(SelectedObj, a)
+	t.eq(LogHas("other#other is not an interrupter, selecting a#a"), true)
 end)
 
 t.case("CombatActionCannotBeStarted ignores the frozen enemy and counts the interrupters", function()
@@ -646,16 +732,48 @@ t.case("StartCombatAction queues behind another interrupter and starts after it"
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local st = ActiveState({ a, b }, enemy)
+	local it = ActiveState({ a, b }, enemy)
 	CombatActions_RunningState[a] = "start"
 	StartCombatAction("Move", b, 2000)
 	t.eq(#ran_actions, 0)
-	t.eq(#st.queue, 1)
+	t.eq(it:QueueLength(), 1)
+	t.eq(LogHas("queued Move: 1 waiting"), true)
 	CombatActions_RunningState[a] = "PostAction"
 	OnMsg.CombatPostAction(a)
 	RunThreads()
 	t.eq(#ran_actions, 1) -- Move plays alongside a PostAction
-	t.eq(#st.queue, 0)
+	t.eq(it:QueueLength(), 0)
+end)
+
+t.case("StartCombatAction drops the queued action of a unit that died", function()
+	ResetWorld()
+	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	local it = ActiveState({ a, b }, enemy)
+	CombatActions_RunningState[a] = "start"
+	StartCombatAction("Attack", b, 2000)
+	b.dead = true
+	CombatActions_RunningState[a] = "PostAction"
+	OnMsg.CombatPostAction(a)
+	RunThreads()
+	t.eq(#ran_actions, 0)
+	t.eq(it:QueueLength(), 0)
+	t.eq(LogHas("INT #1 dropped queued Attack: the unit is gone"), true)
+end)
+
+t.case("EndInterrupt refunds the AP of queued actions that never started", function()
+	ResetWorld()
+	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b", ap = 10000 })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	local it = ActiveState({ a, b }, enemy)
+	CombatActions_RunningState[a] = "start"
+	StartCombatAction("Attack", b, 3000)
+	t.eq(b.ActionPoints, 7000)
+	Q.UI = { End = function() end }
+	Q.EndInterrupt(it, "test")
+	t.eq(b.ActionPoints, 10000)
+	t.eq(it:QueueLength(), 0)
+	t.eq(LogHas("INT #1 dropped queued action Attack of " .. Q.Name(b) .. ", refunded 3000 raw AP"), true)
 end)
 
 t.case("StartCombatAction keeps vanilla behavior for other units", function()
@@ -681,16 +799,81 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	ResetWorld()
 	local a = FakeUnit({ id = "a", command = "FirearmAttack" })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local st = ActiveState({ a }, enemy)
-	Q.UI = { Refresh = function() end }
+	local it = ActiveState({ a }, enemy)
+	local refreshed = 0
+	Q.UI = { Refresh = function() refreshed = refreshed + 1 end }
 	NetSyncEvents.EndTurn(netUniqueId)
-	t.eq(st.end_requested, true)
-	t.eq(st.force_end, false)
+	t.eq(LogHas("end requested %(End Turn%)%. busy=true"), true)
+	t.eq(refreshed, 1)
+	t.eq(it:EndReason(), nil)
+	t.eq(a.command, "FirearmAttack")
 	NetSyncEvents.EndTurn(netUniqueId)
-	t.eq(st.force_end, true)
+	t.eq(LogHas("STUCK%? End Turn pressed again while a merc is busy"), true)
 	t.eq(a.command, "Idle")
+	t.eq(it:EndReason(), "forced_end")
 	Q.active = false
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
+end)
+
+t.case("Activate returns the new shell with the dummy and the start AP of each interrupter", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 7000 })
+	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), winners = { a },
+		joiners = {}, system = "IIS", kind = "move", cfg = Q.Config }
+	local dummy = { pos = { x = 1, y = 0 } }
+	local sh = Q.Activate(it, dummy)
+	t.eq(Q.active, it)
+	t.eq(sh.dummy, dummy)
+	t.eq(sh.start_ap[a], 7000)
+end)
+
+t.case("DumpStuck logs the command stack of each busy interrupter that is not down", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "stuck_a", command = "FirearmAttack" })
+	local b = FakeUnit({ id = "stuck_b", command = "FirearmAttack" })
+	local c = FakeUnit({ id = "stuck_c" })
+	b.down = true
+	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	Q.DumpStuck(it, "test")
+	t.eq(LogHas("merc stuck_a#stuck_a cmd=FirearmAttack"), true)
+	t.eq(LogHas("merc stuck_b#stuck_b"), false)
+	t.eq(LogHas("merc stuck_c#stuck_c"), false)
+end)
+
+t.case("An error in the end check ends the interrupt with end_check_error", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	function enemy:IsDead() error("boom") end
+	local it = ActiveState({ a }, enemy)
+	local ui_reason
+	Q.UI = { End = function(_, reason) ui_reason = reason end }
+	local reason = Q.CheckEnd(it)
+	t.eq(reason, "end_check_error")
+	t.eq(LogHas("EndReason failed: .*boom"), true)
+	Q.EndInterrupt(it, reason)
+	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
+	t.eq(ui_reason, "end_check_error")
+	t.eq(Q.active, false)
+end)
+
+t.case("The END log line shows the Forced counts and the AP of each interrupter at the start and at the end", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 10000 })
+	local b = FakeUnit({ id = "b", ap = 8500 })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	game_time = 1000
+	local it = ActiveState({ a }, enemy, { b })
+	Unit.CanBeControlled(a)
+	Unit.CanBeControlled(b)
+	IsNetPlayerTurn()
+	StartCombatAction("Attack", a, 4000)
+	Q.UI = { End = function() end }
+	game_time = 3500
+	Q.EndInterrupt(it, "end_request")
+	game_time = 0
+	t.eq(LogHas("INT #1 END %(end_request%): 2500ms game time, actions=1, ap: a#a 10%->6, b#b 8%.5%->8%.5, "
+		.. "forced: CanBeControlled=2 IsNetPlayerTurn=1$"), true)
 end)
 
 t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of the path", function()
@@ -701,9 +884,8 @@ t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of 
 	enemy.combat_path = { "dest", "mid", here }
 	enemy.combat_path_obj = { GetAP = function(_, p) return p == "dest" and 6000 or 3000 end }
 	enemy.start_move_free_ap = 0
-	local st = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	st.dummy = { pos = here }
-	Q.StopMover(st)
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
+	Q.StopMover(it, { pos = here })
 	t.eq(#enemy.combat_path, 1)
 	t.eq(enemy.combat_path[1], here)
 	t.eq(enemy.ActionPoints, 5000)
@@ -716,11 +898,21 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team, command = "FirearmAttack" })
 	enemy.in_cmd = true
 	enemy.combat_path = { "dest" }
-	local st = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	st.dummy = { pos = { x = 1, y = 0 } }
-	Q.StopMover(st)
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
+	Q.StopMover(it, { pos = { x = 1, y = 0 } })
 	t.eq(enemy.combat_path[1], "dest")
 	t.eq(enemy.iis_stopped, nil)
+end)
+
+t.case("RunInterrupt skips a new interrupt while another one is active", function()
+	ResetWorld()
+	CanYield = function() return true end
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
+	Q.RunInterrupt(enemy, { mercs = { FakeUnit({ id = "b" }) } })
+	CanYield = nil
+	t.eq(LogHas("interrupt skipped: INT #1 is still active"), true)
+	t.eq(Q.active, it)
 end)
 
 t.case("CanSaveGameQuery blocks saves during an interrupt", function()
