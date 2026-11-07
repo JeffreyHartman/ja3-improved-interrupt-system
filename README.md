@@ -25,6 +25,8 @@ The mod is not on the Steam Workshop yet.
 
 Play as usual. When a merc interrupts, you control only the mercs that interrupted. Press End Turn (Enter) to end the interrupt, and the enemy turn continues.
 
+A merc loses its Free Move AP when it enters an interrupt. The interrupt checks count only the AP that can pay for an attack.
+
 If a merc hangs during an action, press End Turn two times.
 
 To turn the mod off, set the "Interrupts enabled" option to off. Do not disable the mod in the Mod Manager, because a save that used the mod turns it on again.

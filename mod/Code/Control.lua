@@ -224,6 +224,20 @@ local function AddCollective(st_mercs, mover, n)
 	return joined
 end
 
+-- Returns the raw Free Move AP that the unit lost. The FreeMove status consumes the AP when it is
+-- removed, and the second branch covers Free Move AP without the status.
+function IIS.RemoveFreeMove(u)
+	local free = u.free_move_ap or 0
+	if free <= 0 then return 0 end
+	u:RemoveStatusEffect("FreeMove")
+	if (u.free_move_ap or 0) > 0 then
+		u:ConsumeAP(u.free_move_ap)
+		u.free_move_ap = 0
+	end
+	ObjModified(u)
+	return free
+end
+
 function IIS.RunInterrupt(mover, info, dummy)
 	local cfg = IIS.Config
 	if type(info) ~= "table" or not info.mercs then
@@ -281,7 +295,12 @@ function IIS.RunInterrupt(mover, info, dummy)
 		AP(mover), info.where or "", tostring(in_cmd))
 	for i, m in ipairs(it:Interrupters()) do
 		local joined_mark = table.find(joined, m) and " (collective)" or ""
-		Log("INT #%d   interrupter %d: %s ap=%s%s", n, i, Name(m), AP(m), joined_mark)
+		local free = 0
+		SafeCall(nil, "RemoveFreeMove", function()
+			free = IIS.RemoveFreeMove(m)
+		end)
+		local free_mark = free > 0 and string.format(" (free move %s removed)", IIS.FormatAP(free)) or ""
+		Log("INT #%d   interrupter %d: %s ap=%s%s%s", n, i, Name(m), AP(m), joined_mark, free_mark)
 	end
 	SafeCall(nil, "before log", function()
 		Log("INT #%d before: %s | ai_controller=%s awareness_pending=%s | %s", n, UIState(it),

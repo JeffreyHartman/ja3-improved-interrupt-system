@@ -167,7 +167,8 @@ local function FakeUnit(o)
 		session_id = o.id,
 		handle = o.id,
 		team = o.team or player_team,
-		ActionPoints = o.ap or 10000,
+		ActionPoints = (o.ap or 10000) + (o.free_move_ap or 0),
+		free_move_ap = o.free_move_ap or 0,
 		max_ap = o.max_ap or 12000,
 		level = o.level or 5,
 		agility = o.agility or 80,
@@ -192,6 +193,13 @@ local function FakeUnit(o)
 	function u:GetPos() return self.pos end
 	function u:GainAP(n) self.ActionPoints = self.ActionPoints + n end
 	function u:ConsumeAP(n) self.ActionPoints = self.ActionPoints - (n or 0) end
+	function u:RemoveStatusEffect(id)
+		if id == "FreeMove" and self.statuses.FreeMove then
+			self.statuses.FreeMove = nil
+			self:ConsumeAP(self.free_move_ap)
+			self.free_move_ap = 0
+		end
+	end
 	function u:IsIdleCommand() return self.command == "Idle" end
 	function u:SetCommand(cmd) self.command = cmd end
 	return u
@@ -230,7 +238,6 @@ end
 E.PlayerUnits = function() return world.players end
 E.CanControlTeam = function(u) return u.team.control == "UI" end
 E.IsAITurnEnemy = function(u) return u.team.control ~= "UI" end
-E.APRaw = function(u) return u.ActionPoints end
 E.MaxAPRaw = function(u) return u.max_ap end
 E.StepRaw = function(stance) return stance == "Crouch" and 1500 or 1000 end
 E.WalkRaw = function() return 1000 end
@@ -311,6 +318,43 @@ t.case("WinSkipReason: the AP minimum does not depend on the watcher's max AP", 
 	Q.Config.require_attack_ap = false
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, max_ap = 6000 }), "Classic"), "AP below minimum")
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 500, max_ap = 24000 }), "IIS"), nil)
+end)
+
+t.case("WinSkipReason: Free Move AP does not pay for the attack or the AP minimum", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 3000, free_move_ap = 29000, attack_cost = 4000, statuses = { FreeMove = true } })
+	t.eq(Q.WinSkipReason(a, "IIS"), "AP below attack cost")
+	Q.Config.require_attack_ap = false
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "b", ap = 0, free_move_ap = 29000 }), "IIS"), "AP below minimum")
+end)
+
+t.case("IISWatcher: the AP of the reaction time leaves out Free Move AP", function()
+	ResetWorld()
+	t.eq(Q.IISWatcher(FakeUnit({ id = "a", ap = 6000, free_move_ap = 3000 })).ap, 6000)
+end)
+
+t.case("RemoveFreeMove: the interrupter loses its Free Move AP and the FreeMove status", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 29000, statuses = { FreeMove = true } })
+	t.eq(Q.RemoveFreeMove(a), 29000)
+	t.eq(a.ActionPoints, 4000)
+	t.eq(a.free_move_ap, 0)
+	t.eq(a.statuses.FreeMove, nil)
+end)
+
+t.case("RemoveFreeMove: Free Move AP without the status is also removed", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 2000 })
+	t.eq(Q.RemoveFreeMove(a), 2000)
+	t.eq(a.ActionPoints, 4000)
+	t.eq(a.free_move_ap, 0)
+end)
+
+t.case("RemoveFreeMove: a unit with no Free Move AP keeps its AP", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 4000 })
+	t.eq(Q.RemoveFreeMove(a), 0)
+	t.eq(a.ActionPoints, 4000)
 end)
 
 t.case("WinSkipReason: AP minimum, attack cost and blocking statuses", function()

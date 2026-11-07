@@ -94,7 +94,7 @@ The AP value that JA3 stores for a unit or a cost. It stays the same with GBO 4,
 The AP that vanilla JA3 shows. One vanilla AP is 1000 raw AP.
 
 **Free Move AP**:
-AP that a unit gets at turn start and can spend only on moves. The unit loses the rest when it attacks or ends its turn.
+AP that a unit gets at turn start and can spend only on moves. The unit loses the rest when it attacks, ends its turn or enters an interrupt as an interrupter. The interrupt checks do not count it.
 
 **1.13 AP**:
 An AP amount on the JA2 1.13 scale, converted from JA3 AP at the same rate for every unit.
