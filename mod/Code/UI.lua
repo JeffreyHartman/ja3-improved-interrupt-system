@@ -32,7 +32,10 @@ local function NamesText(units)
 	for _, u in ipairs(units) do
 		parts[#parts + 1] = DisplayName(u)
 	end
-	return table.concat(parts, ", ")
+	if #parts < 2 then
+		return parts[1] or ""
+	end
+	return table.concat(parts, ", ", 1, #parts - 1) .. " and " .. parts[#parts]
 end
 
 ------------------------------------------------------------------------------------------------
@@ -184,21 +187,18 @@ end
 ------------------------------------------------------------------------------------------------
 -- Camera
 
-local camera_midpoint_tiles = 20
-
 function UI.FocusCamera(it)
 	if CurrentActionCamera then
 		return "action camera playing"
 	end
-	local merc, mover = it:Top(), it:Mover()
-	local target = merc:GetVisualPos()
-	local how = "merc"
-	if IsValid(mover) and merc:GetDist(mover) <= camera_midpoint_tiles * const.SlabSizeX then
-		target = (merc:GetVisualPos() + mover:GetVisualPos()) / 2
-		how = "midpoint"
+	local mover = it:Mover()
+	if IsValid(mover) then
+		SnapCameraToObj(mover:GetVisualPos(), "force", GetFloorOfPos(mover:GetPosXYZ()))
+		return "enemy"
 	end
-	SnapCameraToObj(target, "force", GetFloorOfPos(merc:GetPosXYZ()))
-	return how
+	local merc = it:Top()
+	SnapCameraToObj(merc:GetVisualPos(), "force", GetFloorOfPos(merc:GetPosXYZ()))
+	return "merc"
 end
 
 ------------------------------------------------------------------------------------------------
@@ -226,8 +226,9 @@ function UI.Begin(it)
 		CreateFloatingText(it:Mover(), Untranslated("Interrupted"), "FloatingTextMiss")
 	end)
 	safe(it, "UI combat log", function()
-		CombatLog("important", T{Untranslated("<names> interrupt <mover>! End Turn resumes the enemy turn."),
-			names = NamesText(it:Interrupters()), mover = it:Mover():GetLogName()})
+		local units = it:Interrupters()
+		CombatLog("important", T{Untranslated("<names> <verb> <mover>."), names = NamesText(units),
+			verb = #units == 1 and "interrupts" or "interrupt", mover = it:Mover():GetLogName()})
 	end)
 	Log("INT #%d UI shown: banner=%s portraits_refreshed=%d camera=%s", it:Number(), tostring(banner_shown),
 		portraits, tostring(camera))
@@ -243,27 +244,14 @@ function UI.Refresh(it)
 	safe(it, "UI portraits", UI.RefreshPortraits)
 end
 
--- The combat log text for each end reason code from IISInterrupt:EndReason and Control.lua.
-local end_reason_text = {
-	combat_ended = "combat ended",
-	mover_dead = "enemy dead",
-	interrupters_down = "all interrupters are down",
-	forced_end = "forced: End Turn pressed again while a merc was busy",
-	end_request = "player ended the interrupt",
-	auto_end = "interrupters are out of AP (auto end)",
-	end_check_error = "error in EndReason",
-	mover_command_ended = "enemy command ended (destructor)",
-}
-
-function UI.End(it, reason)
+function UI.End(it)
 	local safe = IIS.SafeCall
 	safe(it, "UI banner", UI.HideBanner)
 	-- IIS.active is already false here, so the portraits go back to vanilla.
 	safe(it, "UI portraits", UI.RefreshPortraits)
 	safe(it, "UI sound", PlayFX, "PlayerCombatTurnEnd", "start")
 	safe(it, "UI combat log", function()
-		CombatLog("important", T{Untranslated("Interrupt over (<reason>). The enemy turn continues."),
-			reason = end_reason_text[reason] or reason})
+		CombatLog("important", Untranslated("Interrupt over."))
 	end)
 	Log("INT #%d UI cleared", it:Number())
 end

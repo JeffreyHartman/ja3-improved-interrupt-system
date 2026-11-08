@@ -850,14 +850,14 @@ t.case("An error in the end check ends the interrupt with end_check_error", func
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
 	function enemy:IsDead() error("boom") end
 	local it = ActiveState({ a }, enemy)
-	local ui_reason
-	Q.UI = { End = function(_, reason) ui_reason = reason end }
+	local ui_ended = false
+	Q.UI = { End = function() ui_ended = true end }
 	local reason = Q.CheckEnd(it)
 	t.eq(reason, "end_check_error")
 	t.eq(LogHas("EndReason failed: .*boom"), true)
 	Q.EndInterrupt(it, reason)
 	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
-	t.eq(ui_reason, "end_check_error")
+	t.eq(ui_ended, true)
 	t.eq(Q.active, false)
 end)
 

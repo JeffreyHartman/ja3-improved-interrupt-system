@@ -36,7 +36,7 @@ Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
 - `tests/test_memory.lua` checks `IISMemory` with a plain store table.
 - `tests/test_interrupt.lua` checks `IISInterrupt` with a fake clock and plain units.
 - `tests/test_engine.lua` loads `IIS.lua` and `Control.lua` with fake engine functions and the real `IISMemory` and `IISInterrupt`.
-- `tests/test_ui.lua` loads `UI.lua` and checks the combat log text for each end reason code.
+- `tests/test_ui.lua` loads `UI.lua` and checks the combat log text at the start and end of an interrupt.
 
 The tests do not cover the rest of `UI.lua` or anything that needs the game.
 

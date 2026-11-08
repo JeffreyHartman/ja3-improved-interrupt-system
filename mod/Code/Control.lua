@@ -416,7 +416,7 @@ function IIS.EndInterrupt(it, reason)
 			g_Combat:SetPlayerControl(sh.saved_player_control)
 		end
 	end)
-	SafeCall(it, "UI.End", IIS.UI.End, it, reason)
+	SafeCall(it, "UI.End", IIS.UI.End, it)
 
 	local forced = {}
 	for k, v in pairs(sh.forced) do
