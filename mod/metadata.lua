@@ -5,7 +5,7 @@ return PlaceObj('ModDef', {
 	'author', "jeff",
 	'version_major', 0,
 	'version_minor', 7,
-	'version', 10,
+	'version', 11,
 	'lua_revision', 233360,
 	'saved_with_revision', 366685,
 	'code', {

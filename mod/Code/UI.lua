@@ -78,7 +78,7 @@ end
 
 -- "interrupter", "locked" or nil for a portrait context.
 function UI.PortraitMark(unit)
-	local it = IIS.active
+	local it = IISControl.Active()
 	if not it or not IsKindOf(unit, "Unit") or not unit.team or unit.team.control ~= "UI" or unit:IsDead() then
 		return
 	end
@@ -236,7 +236,7 @@ end
 
 -- Called when an action ends, a merc goes down or End Turn is pressed.
 function UI.Refresh(it)
-	if IIS.active ~= it then
+	if IISControl.Active() ~= it then
 		return
 	end
 	local safe = IIS.SafeCall
@@ -247,7 +247,7 @@ end
 function UI.End(it)
 	local safe = IIS.SafeCall
 	safe(it, "UI banner", UI.HideBanner)
-	-- IIS.active is already false here, so the portraits go back to vanilla.
+	-- The interrupt is no longer active here, so the portraits go back to vanilla.
 	safe(it, "UI portraits", UI.RefreshPortraits)
 	safe(it, "UI sound", PlayFX, "PlayerCombatTurnEnd", "start")
 	safe(it, "UI combat log", function()

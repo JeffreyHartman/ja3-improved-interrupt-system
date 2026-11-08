@@ -102,6 +102,10 @@ function point_pack(p)
 	return p
 end
 
+function GetPackedPosAndStance(unit)
+	return string.format("packed %d,%d", unit.pos.x, unit.pos.y)
+end
+
 function GetPassSlab(p)
 	return p
 end
@@ -131,11 +135,14 @@ g_CurrentTeam = 2
 netUniqueId = 1
 
 local vanilla_result = {}
+local vanilla_provoked = {}
 Unit = {
 	CheckProvokeOpportunityAttacks = function()
 		return vanilla_result.interrupts, vanilla_result.idx
 	end,
-	ProvokeOpportunityAttacksFromList = function() end,
+	ProvokeOpportunityAttacksFromList = function(_, list)
+		vanilla_provoked[#vanilla_provoked + 1] = list
+	end,
 	CanBeControlled = function() return "vanilla" end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
 }
@@ -150,10 +157,26 @@ function WaitOtherCombatActionsEnd() return "vanilla" end
 IModeCombatMovement = { OnMouseButtonDown = function() return "vanilla" end }
 NetSyncEvents = { EndTurn = function() return "vanilla" end }
 NetSyncLocalEffects = { EndTurn = function() return "vanilla" end }
-OnMsg = {}
+-- Like the game, OnMsg keeps every handler that a file defines and runs them in the order of definition.
+local msg_handlers = {}
+OnMsg = setmetatable({}, {
+	__newindex = function(_, name, fn)
+		msg_handlers[name] = msg_handlers[name] or {}
+		table.insert(msg_handlers[name], fn)
+	end,
+	__index = function(_, name)
+		return function(...)
+			for _, fn in ipairs(msg_handlers[name] or {}) do
+				fn(...)
+			end
+		end
+	end,
+})
 
 dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
+-- The game sends ModsReloaded after it runs the code files.
+OnMsg.ModsReloaded()
 
 local Q = IIS
 local E = Q.E
@@ -195,6 +218,7 @@ local function FakeUnit(o)
 	function u:IsOnEnemySide(other) return self.team.side ~= other.team.side end
 	function u:HasNightVision() return false end
 	function u:GetPos() return self.pos end
+	function u:GetVisualPos() return self.pos end
 	function u:GainAP(n) self.ActionPoints = self.ActionPoints + n end
 	function u:ConsumeAP(n) self.ActionPoints = self.ActionPoints - (n or 0) end
 	function u:RemoveStatusEffect(id)
@@ -216,10 +240,18 @@ end
 
 local world = {}
 
+local function EndActive()
+	local it = IISControl.Active()
+	if it then
+		Q.UI = { End = function() end }
+		IISControl.EndInterrupt(it, "test")
+	end
+end
+
 local function ResetWorld()
 	world = { players = {}, los = {}, sees = {}, mover_sees = {}, rand = 99 }
 	Q.attack_targets = {}
-	Q.active = false
+	EndActive()
 	gv_IIS = {}
 	Mem.Setup{
 		key = function(u) return E.Key(u) end,
@@ -227,6 +259,7 @@ local function ResetWorld()
 		store = function() return gv_IIS end,
 	}
 	vanilla_result = {}
+	vanilla_provoked = {}
 	Q.Config.enabled = true
 	Q.Config.system = "IIS"
 	Q.Config.require_attack_ap = true
@@ -283,13 +316,25 @@ local function Steps(...)
 	return row
 end
 
--- Starts an interrupt with Q.Activate, as RunInterrupt does, without the engine calls around it.
-local function ActiveState(winners, mover, joiners)
-	local it = IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, joiners = joiners or {}, system = "IIS",
-		kind = "move", cfg = Q.Config }
-	Q.Activate(it)
+-- Starts an interrupt with IISControl.Activate, as the provoke-list wrapper does, without the engine calls around it.
+local function ActiveState(interrupters, mover)
+	local it = IISInterrupt.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = Q.Config }
+	IISControl.Activate(it)
 	return it
 end
+
+------------------------------------------------------------------------------------------------
+-- Game messages
+
+t.case("The OnMsg fake runs every handler for a message in the order of definition", function()
+	local calls = {}
+	function OnMsg.IISTestMessage(x) calls[#calls + 1] = "first " .. x end
+	function OnMsg.IISTestMessage(x) calls[#calls + 1] = "second " .. x end
+	OnMsg.IISTestMessage("a")
+	t.eq(#calls, 2)
+	t.eq(calls[1], "first a")
+	t.eq(calls[2], "second a")
+end)
 
 ------------------------------------------------------------------------------------------------
 -- Mover and watcher filters
@@ -340,7 +385,7 @@ end)
 t.case("RemoveFreeMove: the interrupter loses its Free Move AP and the FreeMove status", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 29000, statuses = { FreeMove = true } })
-	t.eq(Q.RemoveFreeMove(a), 29000)
+	t.eq(IISControl.RemoveFreeMove(a), 29000)
 	t.eq(a.ActionPoints, 4000)
 	t.eq(a.free_move_ap, 0)
 	t.eq(a.statuses.FreeMove, nil)
@@ -349,7 +394,7 @@ end)
 t.case("RemoveFreeMove: Free Move AP without the status is also removed", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 2000 })
-	t.eq(Q.RemoveFreeMove(a), 2000)
+	t.eq(IISControl.RemoveFreeMove(a), 2000)
 	t.eq(a.ActionPoints, 4000)
 	t.eq(a.free_move_ap, 0)
 end)
@@ -357,7 +402,7 @@ end)
 t.case("RemoveFreeMove: a unit with no Free Move AP keeps its AP", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 4000 })
-	t.eq(Q.RemoveFreeMove(a), 0)
+	t.eq(IISControl.RemoveFreeMove(a), 0)
 	t.eq(a.ActionPoints, 4000)
 end)
 
@@ -583,13 +628,22 @@ t.case("IIS: a vanilla interrupt at an earlier step keeps the AP of the walked s
 	t.eq(Mem.Counter(a, mover), 40) -- 10 + 5 steps of 6
 end)
 
+-- A mover that StopMover stopped on a CombatGoto path in its command thread "cmd".
+local function StoppedMover(mover)
+	mover.in_cmd = true
+	mover.command = "CombatGoto"
+	mover.command_thread = "cmd"
+	mover.combat_path = { "dest", "start" }
+	IISControl.StopMover(ActiveState({ FakeUnit({ id = "b" }) }, mover), { pos = mover.pos })
+	EndActive()
+	return mover
+end
+
 t.case("The check wrapper returns nothing for a stopped mover", function()
-	local mover = IISSetup(10)
-	mover.command_thread = "thread"
-	mover.iis_stopped = "thread"
+	local mover = StoppedMover(IISSetup(10))
 	vanilla_result = { interrupts = { { "overwatch" } }, idx = 2 }
 	t.eq(Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6)), nil)
-	mover.iis_stopped = "old thread"
+	mover.command_thread = "next cmd"
 	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6))
 	t.eq(list[1][1], "overwatch")
 end)
@@ -622,7 +676,7 @@ t.case("After an attack: the log names the skip reason, or each watcher when nob
 	ActiveState({ FakeUnit({ id = "b" }) }, FakeUnit({ id = "other", team = enemy_team }))
 	Q.AddTrigger(mover, "attack reaction", { mover })
 	t.eq(LogHas("after%-attack check by enemy.* skipped: interrupt active"), true)
-	Q.active = false
+	EndActive()
 	local list = Q.AddTrigger(mover, "attack reaction", { mover })
 	t.eq(list, nil)
 	t.eq(LogHas("after attack by enemy.*: no winner: a.*counter 0, reaction time %d+, sees attacker"), true)
@@ -658,14 +712,14 @@ t.case("CanBeControlled: interrupters yes, other player units no, enemies vanill
 	t.eq(Unit.CanBeControlled(enemy), "vanilla")
 	a.down = true
 	t.eq(Unit.CanBeControlled(a), false)
-	Q.active = false
+	EndActive()
 	t.eq(Unit.CanBeControlled(b), "vanilla")
 end)
 
 t.case("CanBeControlled: a collective joiner is an interrupter", function()
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
-	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }))
 	t.eq(Unit.CanBeControlled(b), true)
 	b.down = true
 	t.eq(Unit.CanBeControlled(b), false)
@@ -680,7 +734,7 @@ end
 t.case("Tick selects the next interrupter that can act when the selected one goes down", function()
 	ResetWorld()
 	local a, b, c = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "c" })
-	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	local it = ActiveState({ a, b, c }, FakeUnit({ id = "enemy", team = enemy_team }))
 	FakeSelection(a)
 	Q.Tick(it, 100)
 	t.eq(SelectedObj, a)
@@ -693,7 +747,7 @@ end)
 t.case("SelectionChange selects an interrupter in place of another player unit", function()
 	ResetWorld()
 	local a, b, other = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "other" })
-	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }))
 	FakeSelection(b)
 	OnMsg.SelectionChange()
 	RunThreads()
@@ -749,6 +803,20 @@ t.case("StartCombatAction queues behind another interrupter and starts after it"
 	t.eq(it:QueueLength(), 0)
 end)
 
+t.case("CombatActionEnd traces an enemy action and steps an interrupter action", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	ActiveState({ a }, enemy)
+	Q.UI = { Refresh = function() end }
+	VisibilityUpdate = function() end
+	OnMsg.CombatActionEnd(enemy)
+	OnMsg.CombatActionEnd(a)
+	VisibilityUpdate = nil
+	t.eq(LogHas("enemy action ended: enemy#enemy"), true)
+	t.eq(LogHas("INT #1 merc a#a action ended"), true)
+end)
+
 t.case("StartCombatAction drops the queued action of a unit that died", function()
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
@@ -774,7 +842,7 @@ t.case("EndInterrupt refunds the AP of queued actions that never started", funct
 	StartCombatAction("Attack", b, 3000)
 	t.eq(b.ActionPoints, 7000)
 	Q.UI = { End = function() end }
-	Q.EndInterrupt(it, "test")
+	IISControl.EndInterrupt(it, "test")
 	t.eq(b.ActionPoints, 10000)
 	t.eq(it:QueueLength(), 0)
 	t.eq(LogHas("INT #1 dropped queued action Attack of " .. Q.Name(b) .. ", refunded 3000 raw AP"), true)
@@ -815,20 +883,20 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	t.eq(LogHas("STUCK%? End Turn pressed again while a merc is busy"), true)
 	t.eq(a.command, "Idle")
 	t.eq(it:EndReason(), "forced_end")
-	Q.active = false
+	EndActive()
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
 
-t.case("Activate returns the new shell with the dummy and the start AP of each interrupter", function()
+t.case("Activate returns the takeover state with the dummy and the counters with the start AP of each interrupter", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 7000 })
-	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), winners = { a },
-		joiners = {}, system = "IIS", kind = "move", cfg = Q.Config }
+	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), interrupters = { a },
+		cfg = Q.Config }
 	local dummy = { pos = { x = 1, y = 0 } }
-	local sh = Q.Activate(it, dummy)
-	t.eq(Q.active, it)
-	t.eq(sh.dummy, dummy)
-	t.eq(sh.start_ap[a], 7000)
+	local taken, counters = IISControl.Activate(it, dummy)
+	t.eq(IISControl.Active(), it)
+	t.eq(taken.dummy, dummy)
+	t.eq(counters.start_ap[a], 7000)
 end)
 
 t.case("DumpStuck logs the command stack of each busy interrupter that is not down", function()
@@ -837,7 +905,7 @@ t.case("DumpStuck logs the command stack of each busy interrupter that is not do
 	local b = FakeUnit({ id = "stuck_b", command = "FirearmAttack" })
 	local c = FakeUnit({ id = "stuck_c" })
 	b.down = true
-	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	local it = ActiveState({ a, b, c }, FakeUnit({ id = "enemy", team = enemy_team }))
 	Q.DumpStuck(it, "test")
 	t.eq(LogHas("merc stuck_a#stuck_a cmd=FirearmAttack"), true)
 	t.eq(LogHas("merc stuck_b#stuck_b"), false)
@@ -855,10 +923,10 @@ t.case("An error in the end check ends the interrupt with end_check_error", func
 	local reason = Q.CheckEnd(it)
 	t.eq(reason, "end_check_error")
 	t.eq(LogHas("EndReason failed: .*boom"), true)
-	Q.EndInterrupt(it, reason)
+	IISControl.EndInterrupt(it, reason)
 	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
 	t.eq(ui_ended, true)
-	t.eq(Q.active, false)
+	t.eq(IISControl.Active(), false)
 end)
 
 t.case("The END log line shows the Forced counts and the AP of each interrupter at the start and at the end", function()
@@ -867,14 +935,14 @@ t.case("The END log line shows the Forced counts and the AP of each interrupter 
 	local b = FakeUnit({ id = "b", ap = 8500 })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
 	game_time = 1000
-	local it = ActiveState({ a }, enemy, { b })
+	local it = ActiveState({ a, b }, enemy)
 	Unit.CanBeControlled(a)
 	Unit.CanBeControlled(b)
 	IsNetPlayerTurn()
 	StartCombatAction("Attack", a, 4000)
 	Q.UI = { End = function() end }
 	game_time = 3500
-	Q.EndInterrupt(it, "end_request")
+	IISControl.EndInterrupt(it, "end_request")
 	game_time = 0
 	t.eq(LogHas("INT #1 END %(end_request%): 2500ms game time, actions=1, ap: a#a 10%->6, b#b 8%.5%->8%.5, "
 		.. "forced: CanBeControlled=2 IsNetPlayerTurn=1$"), true)
@@ -889,11 +957,11 @@ t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of 
 	enemy.combat_path_obj = { GetAP = function(_, p) return p == "dest" and 6000 or 3000 end }
 	enemy.start_move_free_ap = 0
 	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.StopMover(it, { pos = here })
+	IISControl.StopMover(it, { pos = here })
 	t.eq(#enemy.combat_path, 1)
 	t.eq(enemy.combat_path[1], here)
 	t.eq(enemy.ActionPoints, 5000)
-	t.eq(enemy.iis_stopped, "cmd")
+	t.eq(IISControl.IsStopped(enemy), true)
 	t.eq(LogHas("stops at"), true)
 end)
 
@@ -911,7 +979,7 @@ t.case("StopMover snaps a stop between two tiles to the pass slab and refunds fr
 	end }
 	enemy.start_move_free_ap = 0
 	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.StopMover(it, { pos = between })
+	IISControl.StopMover(it, { pos = between })
 	GetPassSlab = saved
 	t.eq(#enemy.combat_path, 1)
 	t.eq(enemy.combat_path[1], tile)
@@ -924,20 +992,26 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	enemy.in_cmd = true
 	enemy.combat_path = { "dest" }
 	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.StopMover(it, { pos = { x = 1, y = 0 } })
+	IISControl.StopMover(it, { pos = { x = 1, y = 0 } })
 	t.eq(enemy.combat_path[1], "dest")
-	t.eq(enemy.iis_stopped, nil)
+	t.eq(IISControl.IsStopped(enemy), false)
 end)
 
-t.case("RunInterrupt skips a new interrupt while another one is active", function()
-	ResetWorld()
-	CanYield = function() return true end
-	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.RunInterrupt(enemy, { mercs = { FakeUnit({ id = "b" }) } })
-	CanYield = nil
-	t.eq(LogHas("interrupt skipped: INT #1 is still active"), true)
-	t.eq(Q.active, it)
+t.case("One move-done message commits the move plan and re-plans a stopped mover", function()
+	local mover, a = IISSetup(10)
+	mover.in_cmd = true
+	mover.command_thread = "cmd"
+	local dummies = Path(mover, 6)
+	Q.AddTrigger(mover, "move", dummies)
+	StoppedMover(mover)
+	mover.ai_context = { ai_destination = "far" }
+	mover.pos = dummies[4].pos
+	OnMsg.UnitMovementDone(mover)
+	t.eq(Mem.Counter(a, mover), 28) -- 10 + 3 steps of 6
+	t.eq(mover.ai_context.ai_destination, "packed 3,0")
+	t.eq(IISControl.IsStopped(mover), false)
+	t.eq(LogHas("IIS commit"), true)
+	t.eq(LogHas("enemy enemy#enemy re%-plans from its tile"), true)
 end)
 
 t.case("CanSaveGameQuery blocks saves during an interrupt", function()
@@ -948,4 +1022,341 @@ t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
 	OnMsg.CanSaveGameQuery(query)
 	t.eq(query.iis_interrupt, true)
+end)
+
+------------------------------------------------------------------------------------------------
+-- A full interrupt through the provoke-list wrapper
+
+g_Combat.SetPlayerControl = function(self, v) self.is_player_control = v end
+s_CameraMoveLockReasons = {}
+function VisibilityUpdate() end
+function UnlockCameraMovement() end
+function LockCameraMovement() end
+function HasVisibilityTo() return true end
+function GetInGameInterfaceMode() return "IModeCombatMovement" end
+function SetInGameInterfaceMode() end
+
+-- Each step of `script` is { at = game time in ms, run = function }. The fake sleep advances the
+-- game time and runs each step whose time has come. The captured log starts empty.
+local function FakeControl(script)
+	game_time = 0
+	log_lines = {}
+	local pending = { table.unpack(script or {}) }
+	IISControl.Setup{
+		sleep = function(ms)
+			game_time = game_time + ms
+			if game_time > 60000 then
+				error("the interrupt did not end in 60 s of game time")
+			end
+			while pending[1] and pending[1].at <= game_time do
+				table.remove(pending, 1).run()
+			end
+		end,
+		can_yield = function() return true end,
+	}
+	SelectObj = function(o) SelectedObj = o end
+	Q.UI = { Begin = function() end, End = function() end, Refresh = function() end }
+end
+
+local function PressEndTurn()
+	NetSyncEvents.EndTurn(netUniqueId)
+end
+
+-- The IISSetup mover, walking a path of 6 steps in its own CombatGoto command. Watcher a wins on
+-- step 4. The path costs 6 AP to the end and 3 AP to step 4.
+local function WalkingMover(counter)
+	local mover, a = IISSetup(counter)
+	local dummies = Path(mover, 6)
+	mover.in_cmd = true
+	mover.command = "CombatGoto"
+	mover.command_thread = "cmd"
+	mover.combat_path = { "dest", "mid", "start" }
+	mover.combat_path_obj = { GetAP = function(_, p) return p == "dest" and 6000 or 3000 end }
+	mover.start_move_free_ap = 0
+	local destructors = {}
+	function mover:InterruptBegin() end
+	function mover:SetAnimSpeedModifier() end
+	function mover:PushDestructor(f) destructors[#destructors + 1] = f end
+	function mover:PopDestructor() table.remove(destructors) end
+	function mover:Destructors() return destructors end
+	return mover, a, dummies
+end
+
+t.case("A move trigger: End Turn ends the interrupt with end_request and the mover stops", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	Q.Config.after_interrupt = "stop"
+	local n = IISControl.InterruptCount() + 1
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	t.eq(list[1][1], "iis")
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(LogHas("INT #" .. n .. " BEGIN IIS move: mover=enemy#enemy"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: a#a"), true)
+	t.eq(LogHas("INT #" .. n .. " end requested %(End Turn%)%. busy=false"), true)
+	t.eq(LogHas("INT #" .. n .. " END %(end_request%): 300ms game time"), true)
+	t.eq(IISControl.Active(), false)
+	t.eq(#mover.combat_path, 1)
+	t.eq(mover.combat_path[1], dummies[4].pos)
+	t.eq(mover.ActionPoints, 13000)
+	t.eq(LogHas("INT #" .. n .. " enemy enemy#enemy stops at"), true)
+	t.eq(vanilla_provoked[1], list)
+	game_time = 0
+end)
+
+t.case("While another interrupt is active, a new iis entry starts no interrupt and rolls no collective", function()
+	local mover, a, dummies = WalkingMover(10)
+	local mate = FakeUnit({ id = "mate", pos = { x = 1, y = 6 } })
+	world.players = { a, mate }
+	FakeControl()
+	local count = IISControl.InterruptCount()
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	t.eq(list[1][1], "iis")
+	local other = ActiveState({ FakeUnit({ id = "b" }) }, FakeUnit({ id = "other", team = enemy_team }))
+	local rolls = 0
+	local orig_rand = E.Rand
+	E.Rand = function() rolls = rolls + 1 return 0 end
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	E.Rand = orig_rand
+	t.eq(LogHas("interrupt skipped: INT #1 is still active"), true)
+	t.eq(IISControl.Active(), other)
+	t.eq(IISControl.InterruptCount(), count)
+	t.eq(rolls, 0)
+	t.eq(LogHas("collective"), false)
+	t.eq(#mover.combat_path, 3)
+	t.eq(vanilla_provoked[1], list)
+end)
+
+t.case("A vanilla overwatch entry goes to vanilla unchanged", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl()
+	local count = IISControl.InterruptCount()
+	local entry = { "overwatch", a, "attack args", dummies[2] }
+	local list = { entry }
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(#vanilla_provoked, 1)
+	t.eq(vanilla_provoked[1], list)
+	t.eq(#list, 1)
+	t.eq(list[1], entry)
+	t.eq(entry[1], "overwatch")
+	t.eq(entry[2], a)
+	t.eq(entry[3], "attack args")
+	t.eq(entry[4], dummies[2])
+	t.eq(IISControl.InterruptCount(), count)
+	t.eq(IISControl.Active(), false)
+	t.eq(#log_lines, 0)
+end)
+
+t.case("A move trigger with a collective joiner: the joiner rolls, joins and is marked in its log line", function()
+	local mover, a, dummies = WalkingMover(10)
+	local mate = FakeUnit({ id = "mate", pos = { x = 1, y = 6 } })
+	world.players = { a, mate }
+	world.rand = 0
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	local n = IISControl.InterruptCount() + 1
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(LogHas("INT #" .. n .. " collective: a#a %-> mate#mate chance=%d+ roll=0 JOINS"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: a#a ap=10$"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 2: mate#mate ap=10 %(collective%)$"), true)
+	t.eq(IISControl.InterruptCount(), n)
+	game_time = 0
+end)
+
+t.case("An iis entry from an older version starts no interrupt", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl()
+	local count = IISControl.InterruptCount()
+	Unit.ProvokeOpportunityAttacksFromList(mover, { { "iis", a, nil, dummies[4] } })
+	t.eq(LogHas("interrupt skipped: bad entry from an older version"), true)
+	t.eq(IISControl.InterruptCount(), count)
+	t.eq(IISControl.Active(), false)
+end)
+
+t.case("IIS.lua registers the handler for iis entries on ModsReloaded", function()
+	IISControl.Handle("iis", nil)
+	OnMsg.ModsReloaded()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	local n = IISControl.InterruptCount() + 1
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(LogHas("INT #" .. n .. " BEGIN IIS move: mover=enemy#enemy"), true)
+	game_time = 0
+end)
+
+t.case("The hook status reports the provoke-list wrapper as ours", function()
+	t.eq(Q.HookStatus():find("provoke_hook=ours", 1, true) ~= nil, true)
+end)
+
+t.case("A handler that returns nothing starts no interrupt, and the interrupt number does not change", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl()
+	local count = IISControl.InterruptCount()
+	local calls = {}
+	IISControl.Handle("test", function(m, entry, n)
+		calls[#calls + 1] = { m, entry, n }
+	end)
+	local entry = { "test", a, nil, dummies[4] }
+	local list = { entry }
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	IISControl.Handle("test", nil)
+	t.eq(#calls, 1)
+	t.eq(calls[1][1], mover)
+	t.eq(calls[1][2], entry)
+	t.eq(calls[1][3], count + 1)
+	t.eq(IISControl.InterruptCount(), count)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("BEGIN"), false)
+	t.eq(vanilla_provoked[1], list)
+end)
+
+t.case("A handler that sends stop = false starts an interrupt, and the mover does not stop", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	Q.Config.after_interrupt = "stop"
+	local n = IISControl.InterruptCount() + 1
+	IISControl.Handle("test", function(_, entry)
+		return { interrupters = { entry[2] }, dummy = entry[4], stop = false, label = "Test move",
+			notes = { [entry[2]] = " (test)" } }
+	end)
+	local list = { { "test", a, nil, dummies[4] } }
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	IISControl.Handle("test", nil)
+	t.eq(LogHas("INT #" .. n .. " BEGIN Test move: mover=enemy#enemy"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: a#a ap=10 %(test%)$"), true)
+	t.eq(LogHas("INT #" .. n .. " END %(end_request%): 300ms game time"), true)
+	t.eq(IISControl.InterruptCount(), n)
+	t.eq(IISControl.IsStopped(mover), false)
+	t.eq(#mover.combat_path, 3)
+	t.eq(mover.ActionPoints, 10000)
+	t.eq(LogHas("stops at"), false)
+	t.eq(vanilla_provoked[1], list)
+	game_time = 0
+end)
+
+-- Starts an interrupt through a "test" handler that catches the WalkingMover on a step that is not
+-- a valid object, as CombatGoto's path dummies are in the game.
+local function TestInterrupt(mover, a, script)
+	FakeControl(script)
+	local dummy = { pos = { x = 3, y = 0 }, valid = false }
+	IISControl.Handle("test", function()
+		return { interrupters = { a }, dummy = dummy, stop = false, label = "Test move" }
+	end)
+	Unit.ProvokeOpportunityAttacksFromList(mover, { { "test", a, nil, dummy } })
+	IISControl.Handle("test", nil)
+	game_time = 0
+	return dummy
+end
+
+t.case("After an interrupt, the visibility override, the camera locks and the player control have their old values", function()
+	local mover, a = WalkingMover(10)
+	local hidden_end = { pos = { x = 5, y = 0 }, valid = false }
+	mover.visibility_override = hidden_end
+	s_CameraMoveLockReasons = { cinematic = true }
+	g_Combat.is_player_control = false
+	local saved_lock, saved_unlock = LockCameraMovement, UnlockCameraMovement
+	function LockCameraMovement(reason) s_CameraMoveLockReasons[reason] = true end
+	function UnlockCameraMovement() s_CameraMoveLockReasons = {} end
+	local during = {}
+	local dummy = TestInterrupt(mover, a, {
+		{ at = 100, run = function()
+			during.override = mover.visibility_override
+			during.locked = next(s_CameraMoveLockReasons) ~= nil
+			during.control = g_Combat.is_player_control
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	LockCameraMovement, UnlockCameraMovement = saved_lock, saved_unlock
+	t.eq(during.override, dummy)
+	t.eq(during.locked, false)
+	t.eq(during.control, true)
+	t.eq(mover.visibility_override, hidden_end)
+	t.eq(s_CameraMoveLockReasons.cinematic, true)
+	t.eq(g_Combat.is_player_control, false)
+	s_CameraMoveLockReasons = {}
+end)
+
+-- Replaces the engine calls of the takeover with fakes that write each call to the returned list.
+-- The AI controller is a proxy, so each write of its tracked_pois field is a call too.
+local function RecordTakeover(mover)
+	local calls = {}
+	local saved = { VisibilityUpdate, LockCameraMovement, UnlockCameraMovement, g_Combat.SetPlayerControl,
+		g_AIExecutionController }
+	local push, pop = mover.PushDestructor, mover.PopDestructor
+	function mover:PushDestructor(f)
+		calls[#calls + 1] = "push destructor"
+		push(self, f)
+	end
+	function mover:PopDestructor()
+		calls[#calls + 1] = "pop destructor"
+		pop(self)
+	end
+	function VisibilityUpdate() calls[#calls + 1] = "visibility " .. tostring(mover.visibility_override.pos.x) end
+	function LockCameraMovement(reason) calls[#calls + 1] = "lock " .. reason end
+	function UnlockCameraMovement() calls[#calls + 1] = "unlock" end
+	g_Combat.SetPlayerControl = function(self, v)
+		self.is_player_control = v
+		calls[#calls + 1] = "player control " .. tostring(v)
+	end
+	local fields = { tracked_pois = "pois" }
+	g_AIExecutionController = setmetatable({}, {
+		__index = fields,
+		__newindex = function(_, k, v)
+			if k == "tracked_pois" then calls[#calls + 1] = "ai camera " .. tostring(v) end
+			fields[k] = v
+		end,
+	})
+	local function restore()
+		VisibilityUpdate, LockCameraMovement, UnlockCameraMovement, g_Combat.SetPlayerControl,
+			g_AIExecutionController = table.unpack(saved, 1, 5)
+	end
+	return calls, restore
+end
+
+t.case("The end gives back the engine state in the reverse order of the takes", function()
+	local mover, a = WalkingMover(10)
+	mover.visibility_override = { pos = { x = 5, y = 0 }, valid = false }
+	s_CameraMoveLockReasons = { cinematic = true }
+	g_Combat.is_player_control = false
+	local calls, restore = RecordTakeover(mover)
+	TestInterrupt(mover, a, { { at = 300, run = PressEndTurn } })
+	restore()
+	s_CameraMoveLockReasons = {}
+	t.eq(table.concat(calls, ", "), table.concat({
+		"push destructor", "visibility 3", "unlock", "ai camera false", "player control true",
+		"player control false", "ai camera pois", "lock cinematic", "visibility 5", "pop destructor",
+	}, ", "))
+	t.eq(#mover:Destructors(), 0)
+end)
+
+t.case("An error in one give-back is logged, and the other give-backs still run", function()
+	local mover, a = WalkingMover(10)
+	mover.visibility_override = { pos = { x = 5, y = 0 }, valid = false }
+	s_CameraMoveLockReasons = { cinematic = true }
+	g_Combat.is_player_control = false
+	local calls, restore = RecordTakeover(mover)
+	function LockCameraMovement() error("lock boom") end
+	TestInterrupt(mover, a, { { at = 300, run = PressEndTurn } })
+	restore()
+	s_CameraMoveLockReasons = {}
+	t.eq(LogHas("INT #%d+ restore camera failed: .*lock boom"), true)
+	t.eq(table.concat(calls, ", "), table.concat({
+		"push destructor", "visibility 3", "unlock", "ai camera false", "player control true",
+		"player control false", "ai camera pois", "visibility 5", "pop destructor",
+	}, ", "))
+	t.eq(LogHas("END %(end_request%)"), true)
+end)
+
+t.case("When the mover's command ends in an interrupt, its destructor ends the interrupt and gives back the state", function()
+	local mover, a = WalkingMover(10)
+	g_Combat.is_player_control = false
+	local pops = 0
+	function mover:PopDestructor() pops = pops + 1 end
+	TestInterrupt(mover, a, { { at = 200, run = function()
+		table.remove(mover:Destructors())()
+	end } })
+	t.eq(LogHas("END %(mover_command_ended%)"), true)
+	t.eq(IISControl.Active(), false)
+	t.eq(g_Combat.is_player_control, false)
+	t.eq(pops, 0)
 end)
