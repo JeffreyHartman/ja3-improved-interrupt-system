@@ -1210,7 +1210,7 @@ t.case("A handler that returns nothing starts no interrupt, and the interrupt nu
 	t.eq(vanilla_provoked[1], list)
 end)
 
-t.case("A handler that sends go on starts an interrupt, and the mover does not stop", function()
+t.case("A handler that sends stop = false starts an interrupt, and the mover does not stop", function()
 	local mover, a, dummies = WalkingMover(10)
 	FakeControl{ { at = 300, run = PressEndTurn } }
 	Q.Config.after_interrupt = "stop"
