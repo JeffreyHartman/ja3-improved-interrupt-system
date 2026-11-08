@@ -25,10 +25,9 @@ local function Fresh(o)
 		walk_ap = function() return 1000 end,
 	}
 	local mover = Unit("mover")
-	local winners = o.winners or { Unit("a") }
-	local it = I.Begin{ n = 1, mover = mover, winners = winners, joiners = o.joiners or {}, system = "IIS",
-		kind = "move", cfg = cfg }
-	return it, mover, winners
+	local interrupters = o.interrupters or { Unit("a") }
+	local it = I.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = cfg }
+	return it, mover, interrupters
 end
 
 t.case("Interrupt: Auto end waits for the delay after the last action", function()
@@ -59,14 +58,14 @@ t.case("Interrupt: no Auto end before the first action", function()
 end)
 
 t.case("Interrupt: no Auto end while an interrupter has the AP for one step", function()
-	local it = Fresh{ winners = { Unit("a", { ap = 1000 }) } }
+	local it = Fresh{ interrupters = { Unit("a", { ap = 1000 }) } }
 	it:ActionStarted()
 	clock = 60000
 	t.eq(it:EndReason(), nil)
 end)
 
 t.case("Interrupt: an End request with nobody busy ends the interrupt", function()
-	local it = Fresh{ winners = { Unit("a", { ap = 5000 }) } }
+	local it = Fresh{ interrupters = { Unit("a", { ap = 5000 }) } }
 	t.eq(it:EndReason(), nil)
 	t.eq(it:EndTurnPressed(), "requested")
 	t.eq(it:EndReason(), "end_request")
@@ -99,7 +98,7 @@ t.case("Interrupt: a second press with nobody busy does nothing", function()
 end)
 
 t.case("Interrupt: the interrupt ends when the last interrupter goes down", function()
-	local it, _, w = Fresh{ winners = { Unit("a", { ap = 5000 }) }, joiners = { Unit("b", { ap = 5000 }) } }
+	local it, _, w = Fresh{ interrupters = { Unit("a", { ap = 5000 }), Unit("b", { ap = 5000 }) } }
 	w[1].down = true
 	t.eq(it:EndReason(), nil)
 	it:Interrupters()[2].down = true
@@ -107,7 +106,7 @@ t.case("Interrupt: the interrupt ends when the last interrupter goes down", func
 end)
 
 t.case("Interrupt: the interrupt ends when the mover is dead", function()
-	local it, mover = Fresh{ winners = { Unit("a", { ap = 5000 }) } }
+	local it, mover = Fresh{ interrupters = { Unit("a", { ap = 5000 }) } }
 	mover.down = true
 	t.eq(it:EndReason(), nil)
 	mover.dead = true
@@ -115,7 +114,7 @@ t.case("Interrupt: the interrupt ends when the mover is dead", function()
 end)
 
 t.case("Interrupt: the interrupt ends when combat ends", function()
-	local it = Fresh{ winners = { Unit("a", { ap = 5000 }) } }
+	local it = Fresh{ interrupters = { Unit("a", { ap = 5000 }) } }
 	combat = false
 	t.eq(it:EndReason(), "combat_ended")
 end)
@@ -194,13 +193,13 @@ t.case("Interrupt: a queued action counts as busy", function()
 end)
 
 t.case("Interrupt: a down interrupter is not busy", function()
-	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	local it, _, w = Fresh{ interrupters = { Unit("a"), Unit("b") } }
 	w[1].busy, w[1].down = true, true
 	t.eq(it:Busy(), false)
 end)
 
 t.case("Interrupt: Busy asks the engine busy function only about interrupters that can act", function()
-	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	local it, _, w = Fresh{ interrupters = { Unit("a"), Unit("b") } }
 	w[1].down = true
 	local asked = {}
 	I.Setup{
@@ -230,7 +229,7 @@ end
 local function Yes() return true end
 
 t.case("Interrupt: TakeNext takes the actions that can start in queue order", function()
-	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	local it, _, w = Fresh{ interrupters = { Unit("a"), Unit("b") } }
 	it:Enqueue(Entry("Attack", w[1]))
 	it:Enqueue(Entry("Move", w[2]))
 	t.eq(it:TakeNext(Yes).action_id, "Attack")
@@ -241,7 +240,7 @@ t.case("Interrupt: TakeNext takes the actions that can start in queue order", fu
 end)
 
 t.case("Interrupt: a blocked action that cannot play alongside others stops the scan", function()
-	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	local it, _, w = Fresh{ interrupters = { Unit("a"), Unit("b") } }
 	it:Enqueue(Entry("Attack", w[1]))
 	it:Enqueue(Entry("Move", w[2], { simultaneous = true }))
 	local asked = {}
@@ -255,7 +254,7 @@ t.case("Interrupt: a blocked action that cannot play alongside others stops the 
 end)
 
 t.case("Interrupt: a blocked simultaneous action lets the scan continue", function()
-	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	local it, _, w = Fresh{ interrupters = { Unit("a"), Unit("b") } }
 	it:Enqueue(Entry("Move", w[1], { simultaneous = true }))
 	it:Enqueue(Entry("Attack", w[2]))
 	local e = it:TakeNext(function(x) return x.action_id == "Attack" end)
@@ -281,7 +280,7 @@ end
 
 t.case("Interrupt: after an action starts, TakeNext checks an earlier blocked simultaneous action again and starts nothing", function()
 	local a, b, c = Unit("a"), Unit("b"), Unit("c")
-	local it = Fresh{ winners = { a, b, c } }
+	local it = Fresh{ interrupters = { a, b, c } }
 	local running = { [a] = "PostAction" }
 	it:Enqueue(Entry("MoveA", a, { simultaneous = true }))
 	it:Enqueue(Entry("MoveB", b, { simultaneous = true }))
@@ -297,7 +296,7 @@ t.case("Interrupt: after an action starts, TakeNext checks an earlier blocked si
 end)
 
 t.case("Interrupt: TakeNext drops the action of a dead unit and reports it to on_drop", function()
-	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	local it, _, w = Fresh{ interrupters = { Unit("a"), Unit("b") } }
 	it:Enqueue(Entry("Attack", w[1]))
 	it:Enqueue(Entry("Move", w[2]))
 	w[1].dead = true
@@ -309,7 +308,7 @@ t.case("Interrupt: TakeNext drops the action of a dead unit and reports it to on
 end)
 
 t.case("Interrupt: Drain returns the actions that did not start and empties the queue", function()
-	local it, _, w = Fresh{ winners = { Unit("a"), Unit("b") } }
+	local it, _, w = Fresh{ interrupters = { Unit("a"), Unit("b") } }
 	it:Enqueue(Entry("Attack", w[1]))
 	it:Enqueue(Entry("Move", w[2]))
 	it:Enqueue(Entry("Reload", w[1]))
@@ -331,9 +330,9 @@ t.case("Interrupt: Enqueue restarts the Auto end delay", function()
 	t.eq(it:EndReason(), "auto_end")
 end)
 
-t.case("Interrupt: IsInterrupter is true for the winners and the joiners only", function()
+t.case("Interrupt: IsInterrupter is true for the interrupters only", function()
 	local a, b = Unit("a"), Unit("b")
-	local it, mover = Fresh{ winners = { a }, joiners = { b } }
+	local it, mover = Fresh{ interrupters = { a, b } }
 	t.eq(it:IsInterrupter(a), true)
 	t.eq(it:IsInterrupter(b), true)
 	t.eq(it:IsInterrupter(mover), false)
@@ -343,7 +342,7 @@ end)
 
 t.case("Interrupt: CanAct is true for an interrupter that is not down", function()
 	local a, b = Unit("a"), Unit("b")
-	local it, mover = Fresh{ winners = { a }, joiners = { b } }
+	local it, mover = Fresh{ interrupters = { a, b } }
 	t.eq(it:CanAct(a), true)
 	t.eq(it:CanAct(b), true)
 	b.down = true
@@ -352,18 +351,16 @@ t.case("Interrupt: CanAct is true for an interrupter that is not down", function
 	t.eq(it:CanAct(nil), false)
 end)
 
-t.case("Interrupt: Top is the first winner, even when it is down", function()
+t.case("Interrupt: Top is the first interrupter, even when it is down", function()
 	local a, b, c = Unit("a"), Unit("b"), Unit("c")
-	local it = Fresh{ winners = { a, b }, joiners = { c } }
+	local it = Fresh{ interrupters = { a, b, c } }
 	t.eq(it:Top(), a)
 	a.down = true
 	t.eq(it:Top(), a)
 end)
 
-t.case("Interrupt: Number, Mover, System and Kind return the values from Begin", function()
+t.case("Interrupt: Number and Mover return the values from Begin", function()
 	local it, mover = Fresh()
 	t.eq(it:Number(), 1)
 	t.eq(it:Mover(), mover)
-	t.eq(it:System(), "IIS")
-	t.eq(it:Kind(), "move")
 end)

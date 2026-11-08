@@ -272,9 +272,9 @@ function IIS.RunInterrupt(mover, info, dummy)
 	IIS.interrupt_count = IIS.interrupt_count + 1
 	local n = IIS.interrupt_count
 
-	local winners = {}
+	local interrupters = {}
 	for i, m in ipairs(mercs) do
-		winners[i] = m
+		interrupters[i] = m
 	end
 	local joined = {}
 	if info.system == "IIS" and cfg.collective then
@@ -287,8 +287,10 @@ function IIS.RunInterrupt(mover, info, dummy)
 		IIS.LogCommit(IISMemory.Fired(mover, mercs, here), "interrupt #" .. n, mover)
 	end)
 
-	local it = IISInterrupt.Begin{ n = n, mover = mover, winners = winners, joiners = joined, system = info.system,
-		kind = info.kind, cfg = cfg }
+	for _, m in ipairs(joined) do
+		interrupters[#interrupters + 1] = m
+	end
+	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = interrupters, cfg = cfg }
 
 	local in_cmd = E.InCommandThread(mover)
 	Log("INT #%d BEGIN %s %s: mover=%s pos=%s ap=%s %s in_command_thread=%s", n, info.system, info.kind, Name(mover), Pos(mover),
@@ -352,7 +354,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 	if in_cmd then
 		mover:PopAndCallDestructor()
 	end
-	if cfg.after_interrupt == "stop" and it:Kind() == "move" then
+	if cfg.after_interrupt == "stop" and info.kind == "move" then
 		SafeCall(it, "StopMover", IIS.StopMover, it, sh.dummy)
 	end
 end

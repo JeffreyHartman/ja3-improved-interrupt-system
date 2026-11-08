@@ -31,12 +31,12 @@ end
 
 local function BeginText(names)
 	combat_log = {}
-	local winners = {}
+	local interrupters = {}
 	for i, name in ipairs(names) do
-		winners[i] = Merc(name)
+		interrupters[i] = Merc(name)
 	end
 	local mover = { GetLogName = function() return "Legion Goon" end }
-	IIS.UI.Begin(IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, system = "IIS", kind = "move", cfg = IIS.Config })
+	IIS.UI.Begin(IISInterrupt.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = IIS.Config })
 	return combat_log[1]
 end
 
@@ -48,6 +48,6 @@ end)
 
 t.case("UI.End: the combat log text is the same for every end reason", function()
 	combat_log = {}
-	IIS.UI.End(IISInterrupt.Begin{ n = 1, mover = {}, winners = {}, system = "IIS", kind = "move", cfg = IIS.Config })
+	IIS.UI.End(IISInterrupt.Begin{ n = 1, mover = {}, interrupters = {}, cfg = IIS.Config })
 	t.eq(combat_log[1], "Interrupt over.")
 end)
