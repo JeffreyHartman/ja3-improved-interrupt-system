@@ -825,7 +825,7 @@ function IIS.HookAttackTrace()
 	Unit.ExecFirearmAttacks = IIS.exec_hook
 end
 
-function IIS.TraceEnemyActionEnd(unit)
+function OnMsg.CombatActionEnd(unit)
 	if IsTracedEnemy(unit) then
 		Log("enemy action ended: %s ap=%s cmd=%s t=%d", Name(unit), AP(unit), tostring(unit.command), GameTime())
 	end
@@ -846,9 +846,6 @@ function OnMsg.UnitMovementDone(unit)
 	end)
 	if not ok then
 		Log("move commit failed: %s", tostring(err))
-	end
-	if unit.iis_stopped then
-		IIS.OnStoppedMoverDone(unit)
 	end
 end
 

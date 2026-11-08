@@ -483,7 +483,8 @@ end
 
 -- The AI plays its attacks from ai_context.ai_destination (AIPlayAttacks, CombatAI.lua:211), so a
 -- stopped enemy plans them from where it stands.
-function IIS.OnStoppedMoverDone(unit)
+function OnMsg.UnitMovementDone(unit)
+	if not unit.iis_stopped then return end
 	unit.iis_stopped = nil
 	local ctx = unit.ai_context
 	if ctx and ctx.ai_destination then
@@ -627,7 +628,6 @@ local function OnInterrupterActionStep(unit, what)
 end
 
 function OnMsg.CombatActionEnd(unit)
-	IIS.TraceEnemyActionEnd(unit)
 	OnInterrupterActionStep(unit, "end")
 end
 

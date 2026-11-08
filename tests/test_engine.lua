@@ -102,6 +102,10 @@ function point_pack(p)
 	return p
 end
 
+function GetPackedPosAndStance(unit)
+	return string.format("packed %d,%d", unit.pos.x, unit.pos.y)
+end
+
 function GetPassSlab(p)
 	return p
 end
@@ -150,7 +154,21 @@ function WaitOtherCombatActionsEnd() return "vanilla" end
 IModeCombatMovement = { OnMouseButtonDown = function() return "vanilla" end }
 NetSyncEvents = { EndTurn = function() return "vanilla" end }
 NetSyncLocalEffects = { EndTurn = function() return "vanilla" end }
-OnMsg = {}
+-- Like the game, OnMsg keeps every handler that a file defines and runs them in the order of definition.
+local msg_handlers = {}
+OnMsg = setmetatable({}, {
+	__newindex = function(_, name, fn)
+		msg_handlers[name] = msg_handlers[name] or {}
+		table.insert(msg_handlers[name], fn)
+	end,
+	__index = function(_, name)
+		return function(...)
+			for _, fn in ipairs(msg_handlers[name] or {}) do
+				fn(...)
+			end
+		end
+	end,
+})
 
 dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
@@ -195,6 +213,7 @@ local function FakeUnit(o)
 	function u:IsOnEnemySide(other) return self.team.side ~= other.team.side end
 	function u:HasNightVision() return false end
 	function u:GetPos() return self.pos end
+	function u:GetVisualPos() return self.pos end
 	function u:GainAP(n) self.ActionPoints = self.ActionPoints + n end
 	function u:ConsumeAP(n) self.ActionPoints = self.ActionPoints - (n or 0) end
 	function u:RemoveStatusEffect(id)
@@ -289,6 +308,19 @@ local function ActiveState(interrupters, mover)
 	Q.Activate(it)
 	return it
 end
+
+------------------------------------------------------------------------------------------------
+-- Game messages
+
+t.case("The OnMsg fake runs every handler for a message in the order of definition", function()
+	local calls = {}
+	function OnMsg.IISTestMessage(x) calls[#calls + 1] = "first " .. x end
+	function OnMsg.IISTestMessage(x) calls[#calls + 1] = "second " .. x end
+	OnMsg.IISTestMessage("a")
+	t.eq(#calls, 2)
+	t.eq(calls[1], "first a")
+	t.eq(calls[2], "second a")
+end)
 
 ------------------------------------------------------------------------------------------------
 -- Mover and watcher filters
@@ -748,6 +780,20 @@ t.case("StartCombatAction queues behind another interrupter and starts after it"
 	t.eq(it:QueueLength(), 0)
 end)
 
+t.case("CombatActionEnd traces an enemy action and steps an interrupter action", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	ActiveState({ a }, enemy)
+	Q.UI = { Refresh = function() end }
+	VisibilityUpdate = function() end
+	OnMsg.CombatActionEnd(enemy)
+	OnMsg.CombatActionEnd(a)
+	VisibilityUpdate = nil
+	t.eq(LogHas("enemy action ended: enemy#enemy"), true)
+	t.eq(LogHas("INT #1 merc a#a action ended"), true)
+end)
+
 t.case("StartCombatAction drops the queued action of a unit that died", function()
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
@@ -926,6 +972,23 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	Q.StopMover(it, { pos = { x = 1, y = 0 } })
 	t.eq(enemy.combat_path[1], "dest")
 	t.eq(enemy.iis_stopped, nil)
+end)
+
+t.case("One move-done message commits the move plan and re-plans a stopped mover", function()
+	local mover, a = IISSetup(10)
+	mover.in_cmd = true
+	mover.command_thread = "cmd"
+	local dummies = Path(mover, 6)
+	Q.AddTrigger(mover, "move", dummies)
+	mover.iis_stopped = "cmd"
+	mover.ai_context = { ai_destination = "far" }
+	mover.pos = dummies[4].pos
+	OnMsg.UnitMovementDone(mover)
+	t.eq(Mem.Counter(a, mover), 28) -- 10 + 3 steps of 6
+	t.eq(mover.ai_context.ai_destination, "packed 3,0")
+	t.eq(mover.iis_stopped, nil)
+	t.eq(LogHas("IIS commit"), true)
+	t.eq(LogHas("enemy enemy#enemy re%-plans from its tile"), true)
 end)
 
 t.case("RunInterrupt skips a new interrupt while another one is active", function()
