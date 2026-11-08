@@ -11,6 +11,8 @@
 | `mod/Code/Control.lua` | `IISControl`: the provoke-list wrapper, Free Move removal, the interrupt run, the end of the interrupt and the Stop. It gives control to the interrupters. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
 
+`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `UI.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
+
 The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"` entry to the vanilla interrupt list. It returns nothing for a mover that the Stop stopped. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
 
 The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a handler for each entry type. `IISControl.Handle(entry_type, handler)` registers one. For each entry that has a handler:
@@ -20,7 +22,7 @@ The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a
 3. The handler returns nothing, or a request. If it returns nothing, no interrupt starts and the interrupt number does not change.
 4. A request gives the interrupters (the top interrupter first), the stop step, the Stop decision, the text of the `BEGIN` log line and an optional note for each interrupter. `IISControl` removes the Free Move AP of each interrupter and runs the interrupt.
 
-The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
+The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter in `IIS.lua`. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
 
 When the interrupt starts, `IISControl` takes engine state from the game, and it gives the state back when the interrupt ends. The takeover list in `Control.lua` holds each take together with its give-back: the mover destructor, the visibility override, the camera locks, the AI camera fields and the player control. The start runs the list from the top, and the end runs it from the bottom. An error in one give-back is logged, and the other give-backs still run. The selection and the interface mode are taken but not given back. The counters for the `END` log line are in a separate table.
 

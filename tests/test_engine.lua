@@ -175,6 +175,8 @@ OnMsg = setmetatable({}, {
 
 dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
+-- The game sends ModsReloaded after it runs the code files.
+OnMsg.ModsReloaded()
 
 local Q = IIS
 local E = Q.E
@@ -1168,6 +1170,18 @@ t.case("An iis entry from an older version starts no interrupt", function()
 	t.eq(LogHas("interrupt skipped: bad entry from an older version"), true)
 	t.eq(Q.interrupt_count, count)
 	t.eq(IISControl.Active(), false)
+end)
+
+t.case("IIS.lua registers the handler for iis entries on ModsReloaded", function()
+	IISControl.Handle("iis", nil)
+	OnMsg.ModsReloaded()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	local n = Q.interrupt_count + 1
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(LogHas("INT #" .. n .. " BEGIN IIS move: mover=enemy#enemy"), true)
+	game_time = 0
 end)
 
 t.case("The hook status reports the provoke-list wrapper as ours", function()

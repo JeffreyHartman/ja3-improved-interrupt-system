@@ -790,6 +790,12 @@ function IIS.InterruptRequest(mover, entry, n)
 	}
 end
 
+-- Control.lua loads after this file and defines IISControl.Handle. The game sends ModsReloaded
+-- after it runs the code files of all mods.
+function OnMsg.ModsReloaded()
+	IISControl.Handle("iis", IIS.InterruptRequest)
+end
+
 local orig_CheckProvokeOpportunityAttacks = Unit.CheckProvokeOpportunityAttacks
 function Unit:CheckProvokeOpportunityAttacks(action, trigger_type, target_dummies_all, visible_only, return_result, ...)
 	-- After an interrupt with after_interrupt == "stop", the mover walks no further, so its

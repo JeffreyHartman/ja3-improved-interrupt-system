@@ -421,9 +421,6 @@ function Unit:ProvokeOpportunityAttacksFromList(list, ...)
 end
 IIS.provoke_hook = Unit.ProvokeOpportunityAttacksFromList
 
--- IIS.lua loads before this file, so it cannot register its handler itself.
-IISControl.Handle("iis", IIS.InterruptRequest)
-
 -- Returns the end reason code of IISInterrupt, or "end_check_error" when the check fails.
 function IIS.CheckEnd(it)
 	local ok, reason = SafeCall(it, "EndReason", it.EndReason, it)
