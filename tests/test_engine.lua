@@ -238,10 +238,18 @@ end
 
 local world = {}
 
+local function EndActive()
+	local it = IISControl.Active()
+	if it then
+		Q.UI = { End = function() end }
+		IISControl.EndInterrupt(it, "test")
+	end
+end
+
 local function ResetWorld()
 	world = { players = {}, los = {}, sees = {}, mover_sees = {}, rand = 99 }
 	Q.attack_targets = {}
-	Q.active = false
+	EndActive()
 	gv_IIS = {}
 	Mem.Setup{
 		key = function(u) return E.Key(u) end,
@@ -306,10 +314,10 @@ local function Steps(...)
 	return row
 end
 
--- Starts an interrupt with Q.Activate, as RunInterrupt does, without the engine calls around it.
+-- Starts an interrupt with IISControl.Activate, as RunInterrupt does, without the engine calls around it.
 local function ActiveState(interrupters, mover)
 	local it = IISInterrupt.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = Q.Config }
-	Q.Activate(it)
+	IISControl.Activate(it)
 	return it
 end
 
@@ -618,13 +626,22 @@ t.case("IIS: a vanilla interrupt at an earlier step keeps the AP of the walked s
 	t.eq(Mem.Counter(a, mover), 40) -- 10 + 5 steps of 6
 end)
 
+-- A mover that StopMover stopped on a CombatGoto path in its command thread "cmd".
+local function StoppedMover(mover)
+	mover.in_cmd = true
+	mover.command = "CombatGoto"
+	mover.command_thread = "cmd"
+	mover.combat_path = { "dest", "start" }
+	IISControl.StopMover(ActiveState({ FakeUnit({ id = "b" }) }, mover), { pos = mover.pos })
+	EndActive()
+	return mover
+end
+
 t.case("The check wrapper returns nothing for a stopped mover", function()
-	local mover = IISSetup(10)
-	mover.command_thread = "thread"
-	mover.iis_stopped = "thread"
+	local mover = StoppedMover(IISSetup(10))
 	vanilla_result = { interrupts = { { "overwatch" } }, idx = 2 }
 	t.eq(Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6)), nil)
-	mover.iis_stopped = "old thread"
+	mover.command_thread = "next cmd"
 	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6))
 	t.eq(list[1][1], "overwatch")
 end)
@@ -657,7 +674,7 @@ t.case("After an attack: the log names the skip reason, or each watcher when nob
 	ActiveState({ FakeUnit({ id = "b" }) }, FakeUnit({ id = "other", team = enemy_team }))
 	Q.AddTrigger(mover, "attack reaction", { mover })
 	t.eq(LogHas("after%-attack check by enemy.* skipped: interrupt active"), true)
-	Q.active = false
+	EndActive()
 	local list = Q.AddTrigger(mover, "attack reaction", { mover })
 	t.eq(list, nil)
 	t.eq(LogHas("after attack by enemy.*: no winner: a.*counter 0, reaction time %d+, sees attacker"), true)
@@ -693,7 +710,7 @@ t.case("CanBeControlled: interrupters yes, other player units no, enemies vanill
 	t.eq(Unit.CanBeControlled(enemy), "vanilla")
 	a.down = true
 	t.eq(Unit.CanBeControlled(a), false)
-	Q.active = false
+	EndActive()
 	t.eq(Unit.CanBeControlled(b), "vanilla")
 end)
 
@@ -823,7 +840,7 @@ t.case("EndInterrupt refunds the AP of queued actions that never started", funct
 	StartCombatAction("Attack", b, 3000)
 	t.eq(b.ActionPoints, 7000)
 	Q.UI = { End = function() end }
-	Q.EndInterrupt(it, "test")
+	IISControl.EndInterrupt(it, "test")
 	t.eq(b.ActionPoints, 10000)
 	t.eq(it:QueueLength(), 0)
 	t.eq(LogHas("INT #1 dropped queued action Attack of " .. Q.Name(b) .. ", refunded 3000 raw AP"), true)
@@ -864,7 +881,7 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	t.eq(LogHas("STUCK%? End Turn pressed again while a merc is busy"), true)
 	t.eq(a.command, "Idle")
 	t.eq(it:EndReason(), "forced_end")
-	Q.active = false
+	EndActive()
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
 
@@ -874,8 +891,8 @@ t.case("Activate returns the new shell with the dummy and the start AP of each i
 	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), interrupters = { a },
 		cfg = Q.Config }
 	local dummy = { pos = { x = 1, y = 0 } }
-	local sh = Q.Activate(it, dummy)
-	t.eq(Q.active, it)
+	local sh = IISControl.Activate(it, dummy)
+	t.eq(IISControl.Active(), it)
 	t.eq(sh.dummy, dummy)
 	t.eq(sh.start_ap[a], 7000)
 end)
@@ -904,10 +921,10 @@ t.case("An error in the end check ends the interrupt with end_check_error", func
 	local reason = Q.CheckEnd(it)
 	t.eq(reason, "end_check_error")
 	t.eq(LogHas("EndReason failed: .*boom"), true)
-	Q.EndInterrupt(it, reason)
+	IISControl.EndInterrupt(it, reason)
 	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
 	t.eq(ui_ended, true)
-	t.eq(Q.active, false)
+	t.eq(IISControl.Active(), false)
 end)
 
 t.case("The END log line shows the Forced counts and the AP of each interrupter at the start and at the end", function()
@@ -923,7 +940,7 @@ t.case("The END log line shows the Forced counts and the AP of each interrupter 
 	StartCombatAction("Attack", a, 4000)
 	Q.UI = { End = function() end }
 	game_time = 3500
-	Q.EndInterrupt(it, "end_request")
+	IISControl.EndInterrupt(it, "end_request")
 	game_time = 0
 	t.eq(LogHas("INT #1 END %(end_request%): 2500ms game time, actions=1, ap: a#a 10%->6, b#b 8%.5%->8%.5, "
 		.. "forced: CanBeControlled=2 IsNetPlayerTurn=1$"), true)
@@ -938,11 +955,11 @@ t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of 
 	enemy.combat_path_obj = { GetAP = function(_, p) return p == "dest" and 6000 or 3000 end }
 	enemy.start_move_free_ap = 0
 	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.StopMover(it, { pos = here })
+	IISControl.StopMover(it, { pos = here })
 	t.eq(#enemy.combat_path, 1)
 	t.eq(enemy.combat_path[1], here)
 	t.eq(enemy.ActionPoints, 5000)
-	t.eq(enemy.iis_stopped, "cmd")
+	t.eq(IISControl.IsStopped(enemy), true)
 	t.eq(LogHas("stops at"), true)
 end)
 
@@ -960,7 +977,7 @@ t.case("StopMover snaps a stop between two tiles to the pass slab and refunds fr
 	end }
 	enemy.start_move_free_ap = 0
 	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.StopMover(it, { pos = between })
+	IISControl.StopMover(it, { pos = between })
 	GetPassSlab = saved
 	t.eq(#enemy.combat_path, 1)
 	t.eq(enemy.combat_path[1], tile)
@@ -973,9 +990,9 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	enemy.in_cmd = true
 	enemy.combat_path = { "dest" }
 	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.StopMover(it, { pos = { x = 1, y = 0 } })
+	IISControl.StopMover(it, { pos = { x = 1, y = 0 } })
 	t.eq(enemy.combat_path[1], "dest")
-	t.eq(enemy.iis_stopped, nil)
+	t.eq(IISControl.IsStopped(enemy), false)
 end)
 
 t.case("One move-done message commits the move plan and re-plans a stopped mover", function()
@@ -984,13 +1001,13 @@ t.case("One move-done message commits the move plan and re-plans a stopped mover
 	mover.command_thread = "cmd"
 	local dummies = Path(mover, 6)
 	Q.AddTrigger(mover, "move", dummies)
-	mover.iis_stopped = "cmd"
+	StoppedMover(mover)
 	mover.ai_context = { ai_destination = "far" }
 	mover.pos = dummies[4].pos
 	OnMsg.UnitMovementDone(mover)
 	t.eq(Mem.Counter(a, mover), 28) -- 10 + 3 steps of 6
 	t.eq(mover.ai_context.ai_destination, "packed 3,0")
-	t.eq(mover.iis_stopped, nil)
+	t.eq(IISControl.IsStopped(mover), false)
 	t.eq(LogHas("IIS commit"), true)
 	t.eq(LogHas("enemy enemy#enemy re%-plans from its tile"), true)
 end)
@@ -1074,7 +1091,7 @@ t.case("A move trigger: End Turn ends the interrupt with end_request and the mov
 	t.eq(LogHas("INT #" .. n .. "   interrupter 1: a#a"), true)
 	t.eq(LogHas("INT #" .. n .. " end requested %(End Turn%)%. busy=false"), true)
 	t.eq(LogHas("INT #" .. n .. " END %(end_request%): 300ms game time"), true)
-	t.eq(Q.active, false)
+	t.eq(IISControl.Active(), false)
 	t.eq(#mover.combat_path, 1)
 	t.eq(mover.combat_path[1], dummies[4].pos)
 	t.eq(mover.ActionPoints, 13000)
@@ -1098,7 +1115,7 @@ t.case("While another interrupt is active, a new iis entry starts no interrupt a
 	Unit.ProvokeOpportunityAttacksFromList(mover, list)
 	E.Rand = orig_rand
 	t.eq(LogHas("interrupt skipped: INT #1 is still active"), true)
-	t.eq(Q.active, other)
+	t.eq(IISControl.Active(), other)
 	t.eq(Q.interrupt_count, count)
 	t.eq(rolls, 0)
 	t.eq(LogHas("collective"), false)
@@ -1122,6 +1139,6 @@ t.case("A vanilla overwatch entry goes to vanilla unchanged", function()
 	t.eq(entry[3], "attack args")
 	t.eq(entry[4], dummies[2])
 	t.eq(Q.interrupt_count, count)
-	t.eq(Q.active, false)
+	t.eq(IISControl.Active(), false)
 	t.eq(#log_lines, 0)
 end)
