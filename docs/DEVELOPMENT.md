@@ -7,11 +7,22 @@
 | `mod/Code/Rules.lua` | The 1.13 formulas. It makes no engine calls. |
 | `mod/Code/Memory.lua` | The Watcher memory (counters, Seen this turn, Seen before) and the move plans. It makes no engine calls. |
 | `mod/Code/Interrupt.lua` | The interrupters, the action queue of the interrupters, activity, the stuck timer, the End Turn presses and the end decision of the active interrupt. It makes no engine calls. |
-| `mod/Code/IIS.lua` | Settings, log and trigger checks. `IIS.E` holds every engine read, so the tests can replace it. |
-| `mod/Code/Control.lua` | Runs an interrupt and gives control to the interrupters. |
+| `mod/Code/IIS.lua` | Settings, log, trigger checks and the handler for `"iis"` entries. `IIS.E` holds every engine read, so the tests can replace it. |
+| `mod/Code/Control.lua` | `IISControl`: the provoke-list wrapper, Free Move removal, the interrupt run, the end of the interrupt and the Stop. It gives control to the interrupters. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
 
-The wrapper of `Unit:CheckProvokeOpportunityAttacks` adds an `"iis"` entry to the vanilla interrupt list. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
+The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"` entry to the vanilla interrupt list. It returns nothing for a mover that the Stop stopped. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
+
+The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a handler for each entry type. `IISControl.Handle(entry_type, handler)` registers one. For each entry that has a handler:
+
+1. `IISControl` checks that the thread can yield, that no interrupt is active, and that the mover is valid and alive. If a check fails, it logs the skip reason and does not call the handler.
+2. `IISControl` calls the handler with the mover, the entry and the next interrupt number.
+3. The handler returns nothing, or a request. If it returns nothing, no interrupt starts and the interrupt number does not change.
+4. A request gives the interrupters (the top interrupter first), the stop step, the Stop decision, the text of the `BEGIN` log line and an optional note for each interrupter. `IISControl` removes the Free Move AP of each interrupter and runs the interrupt.
+
+The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
+
+After the handlers, the wrapper gives the full list to vanilla. Vanilla ignores the `"iis"` entry type. An entry type with no handler, such as a vanilla `"overwatch"` entry, goes to vanilla unchanged.
 
 These overrides change behavior only while an interrupt is active:
 

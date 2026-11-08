@@ -314,7 +314,7 @@ local function Steps(...)
 	return row
 end
 
--- Starts an interrupt with IISControl.Activate, as RunInterrupt does, without the engine calls around it.
+-- Starts an interrupt with IISControl.Activate, as the provoke-list wrapper does, without the engine calls around it.
 local function ActiveState(interrupters, mover)
 	local it = IISInterrupt.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = Q.Config }
 	IISControl.Activate(it)
@@ -383,7 +383,7 @@ end)
 t.case("RemoveFreeMove: the interrupter loses its Free Move AP and the FreeMove status", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 29000, statuses = { FreeMove = true } })
-	t.eq(Q.RemoveFreeMove(a), 29000)
+	t.eq(IISControl.RemoveFreeMove(a), 29000)
 	t.eq(a.ActionPoints, 4000)
 	t.eq(a.free_move_ap, 0)
 	t.eq(a.statuses.FreeMove, nil)
@@ -392,7 +392,7 @@ end)
 t.case("RemoveFreeMove: Free Move AP without the status is also removed", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 4000, free_move_ap = 2000 })
-	t.eq(Q.RemoveFreeMove(a), 2000)
+	t.eq(IISControl.RemoveFreeMove(a), 2000)
 	t.eq(a.ActionPoints, 4000)
 	t.eq(a.free_move_ap, 0)
 end)
@@ -400,7 +400,7 @@ end)
 t.case("RemoveFreeMove: a unit with no Free Move AP keeps its AP", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 4000 })
-	t.eq(Q.RemoveFreeMove(a), 0)
+	t.eq(IISControl.RemoveFreeMove(a), 0)
 	t.eq(a.ActionPoints, 4000)
 end)
 
@@ -1141,4 +1141,80 @@ t.case("A vanilla overwatch entry goes to vanilla unchanged", function()
 	t.eq(Q.interrupt_count, count)
 	t.eq(IISControl.Active(), false)
 	t.eq(#log_lines, 0)
+end)
+
+t.case("A move trigger with a collective joiner: the joiner rolls, joins and is marked in its log line", function()
+	local mover, a, dummies = WalkingMover(10)
+	local mate = FakeUnit({ id = "mate", pos = { x = 1, y = 6 } })
+	world.players = { a, mate }
+	world.rand = 0
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	local n = Q.interrupt_count + 1
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(LogHas("INT #" .. n .. " collective: a#a %-> mate#mate chance=%d+ roll=0 JOINS"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: a#a ap=10$"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 2: mate#mate ap=10 %(collective%)$"), true)
+	t.eq(Q.interrupt_count, n)
+	game_time = 0
+end)
+
+t.case("An iis entry from an older version starts no interrupt", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl()
+	local count = Q.interrupt_count
+	Unit.ProvokeOpportunityAttacksFromList(mover, { { "iis", a, nil, dummies[4] } })
+	t.eq(LogHas("interrupt skipped: bad entry from an older version"), true)
+	t.eq(Q.interrupt_count, count)
+	t.eq(IISControl.Active(), false)
+end)
+
+t.case("The hook status reports the provoke-list wrapper as ours", function()
+	t.eq(Q.HookStatus():find("provoke_hook=ours", 1, true) ~= nil, true)
+end)
+
+t.case("A handler that returns nothing starts no interrupt, and the interrupt number does not change", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl()
+	local count = Q.interrupt_count
+	local calls = {}
+	IISControl.Handle("test", function(m, entry, n)
+		calls[#calls + 1] = { m, entry, n }
+	end)
+	local entry = { "test", a, nil, dummies[4] }
+	local list = { entry }
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	IISControl.Handle("test", nil)
+	t.eq(#calls, 1)
+	t.eq(calls[1][1], mover)
+	t.eq(calls[1][2], entry)
+	t.eq(calls[1][3], count + 1)
+	t.eq(Q.interrupt_count, count)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("BEGIN"), false)
+	t.eq(vanilla_provoked[1], list)
+end)
+
+t.case("A handler that sends go on starts an interrupt, and the mover does not stop", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	Q.Config.after_interrupt = "stop"
+	local n = Q.interrupt_count + 1
+	IISControl.Handle("test", function(_, entry)
+		return { interrupters = { entry[2] }, dummy = entry[4], stop = false, label = "Test move",
+			notes = { [entry[2]] = " (test)" } }
+	end)
+	local list = { { "test", a, nil, dummies[4] } }
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	IISControl.Handle("test", nil)
+	t.eq(LogHas("INT #" .. n .. " BEGIN Test move: mover=enemy#enemy"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: a#a ap=10 %(test%)$"), true)
+	t.eq(LogHas("INT #" .. n .. " END %(end_request%): 300ms game time"), true)
+	t.eq(Q.interrupt_count, n)
+	t.eq(IISControl.IsStopped(mover), false)
+	t.eq(#mover.combat_path, 3)
+	t.eq(mover.ActionPoints, 10000)
+	t.eq(LogHas("stops at"), false)
+	t.eq(vanilla_provoked[1], list)
+	game_time = 0
 end)

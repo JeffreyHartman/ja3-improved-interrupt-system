@@ -1,10 +1,12 @@
 -- Improved Interrupt System: player-controlled interrupts in the style of JA2 1.13.
--- This file holds the settings, the log and the trigger checks. Rules.lua has the 1.13 formulas,
--- Memory.lua has the Watcher memory, Control.lua runs an interrupt and UI.lua shows it.
+-- This file holds the settings, the log, the trigger checks and the IISControl handler for "iis"
+-- entries. Rules.lua has the 1.13 formulas, Memory.lua has the Watcher memory, Control.lua runs an
+-- interrupt and UI.lua shows it.
 --
 -- A trigger is an entry { "iis", top_merc, info, dummy } that the wrapper of
 -- Unit:CheckProvokeOpportunityAttacks adds to the vanilla interrupt list. The game then calls
 -- Unit:ProvokeOpportunityAttacksFromList in the enemy's command thread, and the AI turn waits.
+-- The wrapper of that function in Control.lua passes the entry to IIS.InterruptRequest.
 
 IIS = IIS or {}
 IIS.version = "0.7.3"
@@ -693,6 +695,101 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	return { entry }, idx
 end
 
+-- IIS collective interrupts (Soldier Control.cpp:24960): teammates within 5 tiles of an original
+-- winner join it by chance.
+local function AddCollective(st_mercs, mover, n)
+	local rc = IIS.RulesConfig()
+	local originals = {}
+	for i, m in ipairs(st_mercs) do
+		originals[i] = m
+	end
+	local joined = {}
+	for _, leader in ipairs(originals) do
+		for _, mate in ipairs(E.PlayerUnits()) do
+			local skip = table.find(st_mercs, mate) and "interrupter"
+				or IIS.ObserverSkipReason(mate, mover) or IIS.WinSkipReason(mate, "IIS")
+			if not skip then
+				local dist = E.DistTiles(leader, mate:GetPos())
+				if dist > rc.collective_radius then
+					skip = string.format("%d tiles away (max %d)", dist, rc.collective_radius)
+				end
+			end
+			if skip then
+				if skip ~= "interrupter" then
+					Log("INT #%d collective: %s -> %s skipped: %s", n, Name(leader), Name(mate), skip)
+				end
+			else
+				local chance = R.CollectiveChance(
+					{ leadership = leader:GetProperty("Leadership"), level = leader:GetLevel() },
+					{ level = mate:GetLevel(), agility = mate:GetProperty("Agility"), wisdom = mate:GetProperty("Wisdom") })
+				local roll = E.Rand(100)
+				local ok = roll < chance
+				Log("INT #%d collective: %s -> %s chance=%d roll=%d %s", n, Name(leader), Name(mate), chance, roll, ok and "JOINS" or "no")
+				if ok then
+					st_mercs[#st_mercs + 1] = mate
+					joined[#joined + 1] = mate
+				end
+			end
+		end
+	end
+	return joined
+end
+
+--- The IISControl handler for "iis" entries. Returns the interrupt request for the winners of the
+-- check that can still act and the collective joiners, or nil for an entry from an older version
+-- or when no winner can act.
+-- It calls IISMemory.Fired for the interrupters and logs the commit. `n` is the interrupt number
+-- for the collective log lines.
+function IIS.InterruptRequest(mover, entry, n)
+	local cfg = IIS.Config
+	local info, dummy = entry[3], entry[4]
+	if type(info) ~= "table" or not info.mercs then
+		Log("interrupt skipped: bad entry from an older version")
+		return
+	end
+	local mercs = {}
+	for _, m in ipairs(info.mercs) do
+		if IsValid(m) and not m:IsIncapacitated() and not IIS.WinSkipReason(m, info.system) then
+			mercs[#mercs + 1] = m
+		else
+			Log("interrupt: winner %s can no longer act, dropped", Name(m))
+		end
+	end
+	if #mercs == 0 then
+		Log("interrupt skipped: no winner of check #%d can act", info.check or 0)
+		return
+	end
+
+	local interrupters = {}
+	for i, m in ipairs(mercs) do
+		interrupters[i] = m
+	end
+	local joined = {}
+	if info.system == "IIS" and cfg.collective then
+		IIS.SafeCall(nil, "collective", function()
+			joined = AddCollective(mercs, mover, n)
+		end)
+	end
+	IIS.SafeCall(nil, "IIS memory", function()
+		local here = info.kind == "move" and dummy and dummy.pos or nil
+		IIS.LogCommit(Mem.Fired(mover, mercs, here), "interrupt #" .. n, mover)
+	end)
+
+	local notes = {}
+	for _, m in ipairs(joined) do
+		interrupters[#interrupters + 1] = m
+		notes[m] = " (collective)"
+	end
+	return {
+		interrupters = interrupters,
+		dummy = dummy,
+		stop = cfg.after_interrupt == "stop" and info.kind == "move",
+		label = info.system .. " " .. info.kind,
+		where = info.where,
+		notes = notes,
+	}
+end
+
 local orig_CheckProvokeOpportunityAttacks = Unit.CheckProvokeOpportunityAttacks
 function Unit:CheckProvokeOpportunityAttacks(action, trigger_type, target_dummies_all, visible_only, return_result, ...)
 	-- After an interrupt with after_interrupt == "stop", the mover walks no further, so its
@@ -708,24 +805,6 @@ function Unit:CheckProvokeOpportunityAttacks(action, trigger_type, target_dummie
 		return interrupts, provoke_idx
 	end
 	return a, b
-end
-
-local orig_ProvokeOpportunityAttacksFromList = Unit.ProvokeOpportunityAttacksFromList
-function Unit:ProvokeOpportunityAttacksFromList(list, ...)
-	local ours = false
-	for _, data in ipairs(list or empty_table) do
-		if data[1] == "iis" then
-			ours = true
-			IIS.RunInterrupt(self, data[3], data[4])
-		end
-	end
-	-- Vanilla ignores the "iis" entry type, adds it to passed_interrupts and ends the interrupt.
-	local result = orig_ProvokeOpportunityAttacksFromList(self, list, ...)
-	if ours then
-		Log("provoke list done: mover=%s interrupted=%s stopped=%s pos=%s ap=%s", Name(self), tostring(self.interrupted),
-			tostring(IISControl.IsStopped(self)), Pos(self), AP(self))
-	end
-	return result
 end
 
 ------------------------------------------------------------------------------------------------
@@ -932,5 +1011,4 @@ function IIS.LogConfig(why)
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks
-IIS.provoke_hook = Unit.ProvokeOpportunityAttacksFromList
 IIS.LogConfig("loaded " .. IIS.version)
