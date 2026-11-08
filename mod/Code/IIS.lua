@@ -413,7 +413,7 @@ function IIS.MoverSkipReason(mover, trigger_type, visible_only, return_result)
 	if not g_AIExecutionController then return "no AI turn" end
 	if g_AIExecutionController.reposition or mover.command == "Reposition" then return "reposition phase" end
 	if IsSetpiecePlaying() then return "setpiece" end
-	if IIS.active then return "interrupt active" end
+	if IISControl.Active() then return "interrupt active" end
 	if not E.IsAITurnEnemy(mover) then return "mover is not on the AI team that has the turn" end
 	if mover.opportunity_attack then return "mover is in an opportunity attack" end
 end
@@ -696,9 +696,8 @@ end
 local orig_CheckProvokeOpportunityAttacks = Unit.CheckProvokeOpportunityAttacks
 function Unit:CheckProvokeOpportunityAttacks(action, trigger_type, target_dummies_all, visible_only, return_result, ...)
 	-- After an interrupt with after_interrupt == "stop", the mover walks no further, so its
-	-- remaining path must not get new interrupts (Control.lua, StopMover). The flag holds the
-	-- command thread of that move, so it means nothing once the command changes.
-	if self.iis_stopped and self.iis_stopped == self.command_thread and trigger_type == "move" and not return_result then
+	-- remaining path must not get new interrupts (IISControl.StopMover).
+	if IISControl.IsStopped(self) and trigger_type == "move" and not return_result then
 		return
 	end
 	local interrupts, provoke_idx = orig_CheckProvokeOpportunityAttacks(self, action, trigger_type, target_dummies_all, visible_only, return_result, ...)
@@ -724,7 +723,7 @@ function Unit:ProvokeOpportunityAttacksFromList(list, ...)
 	local result = orig_ProvokeOpportunityAttacksFromList(self, list, ...)
 	if ours then
 		Log("provoke list done: mover=%s interrupted=%s stopped=%s pos=%s ap=%s", Name(self), tostring(self.interrupted),
-			tostring(not not self.iis_stopped), Pos(self), AP(self))
+			tostring(IISControl.IsStopped(self)), Pos(self), AP(self))
 	end
 	return result
 end

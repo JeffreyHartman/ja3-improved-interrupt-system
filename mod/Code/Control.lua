@@ -1,15 +1,28 @@
 -- Improved Interrupt System: runs an interrupt. The frozen enemy's command thread waits in
 -- RunInterrupt while the interrupters take orders. End Turn (Enter) ends the interrupt. The
--- overrides at the end of the file change behavior only while IIS.active is set.
+-- overrides at the end of the file change behavior only while an interrupt is active.
 
 local R = IISRules
 local E = IIS.E
 local Log, Name, AP, Pos, NameList = IIS.Log, IIS.Name, IIS.AP, IIS.Pos, IIS.NameList
 
-IIS.active = false
 IIS.interrupt_count = IIS.interrupt_count or 0
 
 IISControl = IISControl or {}
+
+local active = false
+
+--- Returns the active interrupt, or false when no interrupt is active.
+function IISControl.Active()
+	return active
+end
+
+--- Returns true when StopMover stopped `unit` in its current command.
+-- The stopped mark holds the command thread of the stopped move, so it means nothing once the
+-- command changes.
+function IISControl.IsStopped(unit)
+	return unit.iis_stopped ~= nil and unit.iis_stopped == unit.command_thread
+end
 
 local sleep, can_yield
 
@@ -21,17 +34,17 @@ function IISControl.Setup(o)
 end
 
 -- The engine state of the last interrupt that EndInterrupt restores, and the counters for its END
--- log line. IIS.Activate replaces it at the start of each interrupt.
+-- log line. IISControl.Activate replaces it at the start of each interrupt.
 local shell
 
 --- Makes `it` the active interrupt, starts a new shell for it and returns the shell.
 -- `dummy` is the step of the mover's path where the interrupt caught it, or nil.
-function IIS.Activate(it, dummy)
+function IISControl.Activate(it, dummy)
 	shell = { dummy = dummy, start_time = GameTime(), start_ap = {}, forced = {} }
 	for _, m in ipairs(it:Interrupters()) do
 		shell.start_ap[m] = E.APRaw(m)
 	end
-	IIS.active = it
+	active = it
 	return shell
 end
 
@@ -264,8 +277,8 @@ function IIS.RunInterrupt(mover, info, dummy)
 		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
 		return
 	end
-	if IIS.active then
-		Log("interrupt skipped: INT #%d is still active", IIS.active:Number())
+	if active then
+		Log("interrupt skipped: INT #%d is still active", active:Number())
 		return
 	end
 	if not IsValid(mover) or mover:IsDead() then
@@ -331,10 +344,10 @@ function IIS.RunInterrupt(mover, info, dummy)
 	mover:SetAnimSpeedModifier(1000)
 	if in_cmd then
 		mover:PushDestructor(function()
-			IIS.EndInterrupt(it, "mover_command_ended")
+			IISControl.EndInterrupt(it, "mover_command_ended")
 		end)
 	end
-	local sh = IIS.Activate(it, dummy)
+	local sh = IISControl.Activate(it, dummy)
 	SafeCall(it, "BeginControl", BeginControl, it, sh)
 	SafeCall(it, "UI.Begin", IIS.UI.Begin, it)
 	SafeCall(it, "control log", function()
@@ -342,10 +355,10 @@ function IIS.RunInterrupt(mover, info, dummy)
 	end)
 
 	local elapsed, next_heartbeat = 0, cfg.heartbeat_ms
-	while IIS.active == it do
+	while active == it do
 		local reason = IIS.CheckEnd(it)
 		if reason then
-			IIS.EndInterrupt(it, reason)
+			IISControl.EndInterrupt(it, reason)
 			break
 		end
 		sleep(100)
@@ -371,7 +384,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 		mover:PopAndCallDestructor()
 	end
 	if cfg.after_interrupt == "stop" and info.kind == "move" then
-		SafeCall(it, "StopMover", IIS.StopMover, it, sh.dummy)
+		SafeCall(it, "StopMover", IISControl.StopMover, it, sh.dummy)
 	end
 end
 
@@ -401,9 +414,9 @@ function IIS.Tick(it, elapsed)
 	end
 end
 
-function IIS.EndInterrupt(it, reason)
-	if IIS.active ~= it then return end
-	IIS.active = false
+function IISControl.EndInterrupt(it, reason)
+	if active ~= it then return end
+	active = false
 	local n, mover, sh = it:Number(), it:Mover(), shell
 
 	-- Queued actions that never started already paid their AP.
@@ -455,7 +468,7 @@ end
 -- The enemy stays on the tile where the interrupt caught it and gets back the AP for the rest of
 -- its path, like 1.13 (TeamTurns.cpp:1091). CombatGoto then sees a path of one tile and ends the
 -- move. The path table is the local "path" of Unit:CombatGoto, so it changes in place.
-function IIS.StopMover(it, dummy)
+function IISControl.StopMover(it, dummy)
 	local mover = it:Mover()
 	if not IsValid(mover) or mover:IsDead() then return end
 	if mover.command ~= "CombatGoto" or not E.InCommandThread(mover) then
@@ -512,7 +525,7 @@ function OnMsg.UnitMovementDone(unit)
 end
 
 function IIS.RunMercAction(it, action_id, unit, ap, ...)
-	if IIS.active ~= it then
+	if active ~= it then
 		Log("INT #%d action %s not run: interrupt already ended", it:Number(), tostring(action_id))
 		return
 	end
@@ -526,7 +539,7 @@ end
 -- Starts queued interrupter actions by the vanilla rule of RunCombatActions, applied only to the
 -- interrupters. The vanilla queue would wait for the frozen enemy's action, which does not end.
 function IIS.TryRunQueue(it)
-	if IIS.active ~= it then return end
+	if active ~= it then return end
 	local function can_start(e)
 		local states = {}
 		for _, m in ipairs(it:Interrupters()) do
@@ -552,7 +565,7 @@ end
 
 local orig_IsNetPlayerTurn = IsNetPlayerTurn
 function IsNetPlayerTurn(...)
-	if IIS.active then
+	if active then
 		Forced("IsNetPlayerTurn")
 		return true
 	end
@@ -563,7 +576,7 @@ end
 -- interrupters can be controlled and the other player units cannot.
 local orig_CanBeControlled = Unit.CanBeControlled
 function Unit:CanBeControlled(...)
-	local it = IIS.active
+	local it = active
 	if it and self.team and self.team.control == "UI" then
 		if it:CanAct(self) then
 			Forced("CanBeControlled")
@@ -578,7 +591,7 @@ end
 -- action never gets there during the interrupt. Only the interrupters count here.
 local orig_CombatActionCannotBeStarted = CombatActionCannotBeStarted
 function CombatActionCannotBeStarted(action_id, unit)
-	local it = IIS.active
+	local it = active
 	if it and g_Combat and it:IsInterrupter(unit) then
 		for _, m in ipairs(it:Interrupters()) do
 			local state = CombatActions_RunningState[m]
@@ -593,7 +606,7 @@ end
 
 local orig_NetStartCombatAction = NetStartCombatAction
 function NetStartCombatAction(action_id, unit, ap, args, ...)
-	local it = IIS.active
+	local it = active
 	if not it then
 		return orig_NetStartCombatAction(action_id, unit, ap, args, ...)
 	end
@@ -611,7 +624,7 @@ end
 
 local orig_StartCombatAction = StartCombatAction
 function StartCombatAction(action_id, unit, ap, ...)
-	local it = IIS.active
+	local it = active
 	if not (it and g_Combat and it:IsInterrupter(unit)) then
 		return orig_StartCombatAction(action_id, unit, ap, ...)
 	end
@@ -627,7 +640,7 @@ function StartCombatAction(action_id, unit, ap, ...)
 end
 
 local function OnInterrupterActionStep(unit, what)
-	local it = IIS.active
+	local it = active
 	if not it or not it:IsInterrupter(unit) then return end
 	it:Activity()
 	if what == "end" then
@@ -655,7 +668,7 @@ end
 -- enemy stays in its command until the interrupt ends.
 local orig_IsIdleOrRunningBehavior = Unit.IsIdleOrRunningBehavior
 function Unit:IsIdleOrRunningBehavior(...)
-	local it = IIS.active
+	local it = active
 	if it and self == it:Mover() then
 		Forced("TargetIdle")
 		return true
@@ -667,12 +680,12 @@ end
 -- enemy waits for the interrupt. An interrupter waits only for the other interrupters.
 local orig_WaitOtherCombatActionsEnd = WaitOtherCombatActionsEnd
 function WaitOtherCombatActionsEnd(unit)
-	local it = IIS.active
+	local it = active
 	if not (it and it:IsInterrupter(unit)) then
 		return orig_WaitOtherCombatActionsEnd(unit)
 	end
 	Log("INT #%d WaitOtherCombatActionsEnd for %s waits for the other interrupters only | %s", it:Number(), Name(unit), RunningStateSnapshot())
-	while IIS.active == it do
+	while active == it do
 		local wait = false
 		for _, m in ipairs(it:Interrupters()) do
 			if m ~= unit and CombatActions_RunningState[m] and HasCombatActionInProgress(m) then
@@ -691,7 +704,7 @@ end
 -- (IModeCombatMovement.lua:522).
 local orig_OnMouseButtonDown = IModeCombatMovement.OnMouseButtonDown
 function IModeCombatMovement:OnMouseButtonDown(pt, button, obj)
-	local it = IIS.active
+	local it = active
 	if not it or not g_Teams or not it:Top().team then
 		return orig_OnMouseButtonDown(self, pt, button, obj)
 	end
@@ -711,7 +724,7 @@ end
 
 local orig_EndTurn = NetSyncEvents.EndTurn
 function NetSyncEvents.EndTurn(player_id, ...)
-	local it = IIS.active
+	local it = active
 	if it and player_id == netUniqueId then
 		local press = it:EndTurnPressed()
 		if press == "requested" then
@@ -737,12 +750,12 @@ end
 -- Vanilla marks the local player as done with the turn as soon as End Turn is pressed.
 local orig_EndTurnLocal = NetSyncLocalEffects.EndTurn
 function NetSyncLocalEffects.EndTurn(...)
-	if IIS.active then return end
+	if active then return end
 	return orig_EndTurnLocal(...)
 end
 
 function OnMsg.CanSaveGameQuery(query)
-	if IIS.active then
+	if active then
 		query.iis_interrupt = true
 	end
 end
@@ -750,12 +763,12 @@ end
 -- Portraits and number keys already ask CanBeControlled. This catches any other way to select a
 -- player unit that is not an interrupter.
 function OnMsg.SelectionChange()
-	local it = IIS.active
+	local it = active
 	if not it then return end
 	local sel = SelectedObj
 	if IsKindOf(sel, "Unit") and sel.team and sel.team.control == "UI" and not it:IsInterrupter(sel) then
 		CreateRealTimeThread(function()
-			if IIS.active ~= it then return end
+			if active ~= it then return end
 			local m = it:Living()[1]
 			if m and SelectedObj ~= m and not it:IsInterrupter(SelectedObj) then
 				Log("INT #%d %s is not an interrupter, selecting %s", it:Number(), Name(sel), Name(m))
