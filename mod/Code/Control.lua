@@ -164,108 +164,109 @@ local function FieldToString(v)
 end
 
 -- Each entry takes a piece of engine state when the interrupt begins and gives it back when the
--- interrupt ends. `take(it, s)` and `give(it, s)` keep the state in `s`, the table from Activate.
+-- interrupt ends. `take(it, state)` and `give(it, state)` keep it in `state`, the table from
+-- Activate.
 -- The begin runs the list from the top, and the end from the bottom.
 local takeover = {
 	{
 		-- PopDestructor must run in the mover's command thread, and every caller of EndInterrupt
 		-- runs there. The engine pops a destructor before it calls it, so the give-back pops only
 		-- when the destructor did not run.
-		take = function(it, s)
+		take = function(it, state)
 			local mover = it:Mover()
 			if not E.InCommandThread(mover) then return end
 			mover:PushDestructor(function()
-				s.destructor = false
+				state.destructor = false
 				IISControl.EndInterrupt(it, "mover_command_ended")
 			end)
-			s.destructor = true
+			state.destructor = true
 		end,
 		give_label = "pop destructor",
-		give = function(it, s)
-			if not s.destructor then return end
-			s.destructor = false
+		give = function(it, state)
+			if not state.destructor then return end
+			state.destructor = false
 			it:Mover():PopDestructor()
 		end,
 	},
 	{
 		-- CombatGoto points visibility_override at the path end when the enemy was hidden at the start.
-		take = function(it, s)
-			local mover, dummy = it:Mover(), s.dummy
-			s.visibility_override = mover.visibility_override
-			s.visibility_taken = true
+		take = function(it, state)
+			local mover, dummy = it:Mover(), state.dummy
+			state.visibility_override = mover.visibility_override
+			state.visibility_taken = true
 			if type(dummy) == "table" and dummy.pos and not IsValid(dummy) then
 				mover.visibility_override = dummy
 			end
 			VisibilityUpdate(true)
 		end,
 		give_label = "restore visibility",
-		give = function(it, s)
-			if not s.visibility_taken then return end
+		give = function(it, state)
+			if not state.visibility_taken then return end
 			local mover = it:Mover()
 			if IsValid(mover) then
-				mover.visibility_override = s.visibility_override
+				mover.visibility_override = state.visibility_override
 			end
 			VisibilityUpdate(true)
 		end,
 	},
 	{
-		take = function(it, s)
-			s.camera_locks = CameraLockReasons()
+		take = function(it, state)
+			state.camera_locks = CameraLockReasons()
 			UnlockCameraMovement(nil, "unlock_all")
 		end,
 		give_label = "restore camera",
-		give = function(it, s)
-			for _, lock in ipairs(s.camera_locks or empty_table) do
+		give = function(it, state)
+			for _, lock in ipairs(state.camera_locks or empty_table) do
 				LockCameraMovement(lock)
 			end
 		end,
 	},
 	{
-		take = function(it, s)
+		take = function(it, state)
 			local ctrl = g_AIExecutionController
 			if not ctrl then return end
-			s.ai_camera_ctrl = ctrl
-			s.ai_camera = {}
+			state.ai_camera_ctrl = ctrl
+			state.ai_camera = {}
 			local parts = {}
 			for _, f in ipairs(ai_camera_fields) do
-				s.ai_camera[f] = ctrl[f]
+				state.ai_camera[f] = ctrl[f]
 				parts[#parts + 1] = string.format("%s=%s", f, FieldToString(ctrl[f]))
 				ctrl[f] = false
 			end
 			Log("INT #%d AI camera tracking suspended: %s", it:Number(), table.concat(parts, " "))
 		end,
 		give_label = "restore camera",
-		give = function(it, s)
-			local ctrl = s.ai_camera_ctrl
+		give = function(it, state)
+			local ctrl = state.ai_camera_ctrl
 			if not ctrl then return end
 			if ctrl ~= g_AIExecutionController then
 				Log("INT #%d AI camera tracking not restored: the AI controller changed", it:Number())
 				return
 			end
 			for _, f in ipairs(ai_camera_fields) do
-				ctrl[f] = s.ai_camera[f]
+				ctrl[f] = state.ai_camera[f]
 			end
 			Log("INT #%d AI camera tracking restored", it:Number())
 		end,
 	},
 	{
 		-- Fast forward applies while is_player_control is false (UpdateFastForwardGameSpeed).
-		take = function(it, s)
-			s.player_control = g_Combat.is_player_control
+		take = function(it, state)
+			state.player_control = g_Combat.is_player_control
 			g_Combat:SetPlayerControl(true)
 		end,
 		give_label = "restore player control",
-		give = function(it, s)
-			if g_Combat and s.player_control ~= nil then
-				g_Combat:SetPlayerControl(s.player_control)
+		give = function(it, state)
+			if g_Combat and state.player_control ~= nil then
+				g_Combat:SetPlayerControl(state.player_control)
 			end
 		end,
 	},
 }
 
-local function TakeEngine(it, s)
+local function TakeEngine(it, state)
 	for _, entry in ipairs(takeover) do
-		SafeCall(it, "BeginControl", entry.take, it, s)
+		SafeCall(it, "BeginControl", entry.take, it, state)
 	end
 	-- The selection and the interface mode are not given back.
 	SafeCall(it, "BeginControl", function()
@@ -276,10 +277,10 @@ local function TakeEngine(it, s)
 	end)
 end
 
-local function GiveBackEngine(it, s)
+local function GiveBackEngine(it, state)
 	for i = #takeover, 1, -1 do
 		local entry = takeover[i]
-		SafeCall(it, entry.give_label, entry.give, it, s)
+		SafeCall(it, entry.give_label, entry.give, it, state)
 	end
 end
 
@@ -342,8 +343,8 @@ local function Run(mover, req, n)
 	-- InterruptBegin sets 3% animation speed for the overwatch slow motion. Hit reactions on the
 	-- frozen enemy would then play 33 times slower.
 	mover:SetAnimSpeedModifier(1000)
-	local s = IISControl.Activate(it, req.dummy)
-	TakeEngine(it, s)
+	local state = IISControl.Activate(it, req.dummy)
+	TakeEngine(it, state)
 	SafeCall(it, "UI.Begin", IIS.UI.Begin, it)
 	SafeCall(it, "control log", function()
 		Log("INT #%d control given: %s", n, UIState(it))
@@ -377,7 +378,7 @@ local function Run(mover, req, n)
 		end
 	end
 	if req.stop then
-		SafeCall(it, "StopMover", IISControl.StopMover, it, s.dummy)
+		SafeCall(it, "StopMover", IISControl.StopMover, it, state.dummy)
 	end
 end
 
@@ -450,7 +451,7 @@ end
 function IISControl.EndInterrupt(it, reason)
 	if active ~= it then return end
 	active = false
-	local n, c = it:Number(), counters
+	local n, counters = it:Number(), counters
 
 	-- Queued actions that never started already paid their AP.
 	for _, e in ipairs(it:Drain()) do
@@ -467,15 +468,15 @@ function IISControl.EndInterrupt(it, reason)
 	SafeCall(it, "UI.End", IIS.UI.End, it)
 
 	local forced = {}
-	for k, v in pairs(c.forced) do
+	for k, v in pairs(counters.forced) do
 		forced[#forced + 1] = string.format("%s=%d", k, v)
 	end
 	table.sort(forced)
 	local aps = {}
 	for _, m in ipairs(it:Interrupters()) do
-		aps[#aps + 1] = string.format("%s %s->%s", Name(m), IIS.FormatAP(c.start_ap[m]), IsValid(m) and AP(m) or "?")
+		aps[#aps + 1] = string.format("%s %s->%s", Name(m), IIS.FormatAP(counters.start_ap[m]), IsValid(m) and AP(m) or "?")
 	end
-	Log("INT #%d END (%s): %dms game time, actions=%d, ap: %s, forced: %s", n, reason, GameTime() - c.start_time,
+	Log("INT #%d END (%s): %dms game time, actions=%d, ap: %s, forced: %s", n, reason, GameTime() - counters.start_time,
 		it:Actions(), table.concat(aps, ", "), #forced > 0 and table.concat(forced, " ") or "(none)")
 	SafeCall(it, "after log", function()
 		Log("INT #%d after end: %s | %s", n, UIState(it), RunningStateSnapshot())
