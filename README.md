@@ -57,6 +57,8 @@ Made for vanilla JA3 and for Rato's Gameplay Balance and Overhaul 4. Co-op is no
 - Interrupts from noise
 - The 1.13 watched-location bonus
 
+See [ROADMAP.md](ROADMAP.md) for the plan.
+
 ## Development
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the code layout, the tests and the log.
