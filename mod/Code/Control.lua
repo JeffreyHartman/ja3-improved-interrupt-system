@@ -8,15 +8,19 @@ local R = IISRules
 local E = IIS.E
 local Log, Name, AP, Pos, NameList = IIS.Log, IIS.Name, IIS.AP, IIS.Pos, IIS.NameList
 
-IIS.interrupt_count = IIS.interrupt_count or 0
-
 IISControl = IISControl or {}
 
 local active = false
+local interrupt_count = 0
 
 --- Returns the active interrupt, or false when no interrupt is active.
 function IISControl.Active()
 	return active
+end
+
+--- Returns the number of the last interrupt that started, or 0 before the first one.
+function IISControl.InterruptCount()
+	return interrupt_count
 end
 
 --- Returns true when StopMover stopped `unit` in its current command.
@@ -395,10 +399,10 @@ local function Start(mover, entry, handler)
 		Log("interrupt skipped: mover %s is gone", Name(mover))
 		return
 	end
-	local n = IIS.interrupt_count + 1
+	local n = interrupt_count + 1
 	local req = handler(mover, entry, n)
 	if not req then return end
-	IIS.interrupt_count = n
+	interrupt_count = n
 	Run(mover, req, n)
 end
 

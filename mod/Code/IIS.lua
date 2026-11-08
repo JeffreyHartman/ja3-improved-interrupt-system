@@ -952,7 +952,7 @@ function OnMsg.CombatStart()
 end
 
 function OnMsg.CombatEnd()
-	Log("CombatEnd: checks=%d interrupts=%d", IIS.check_count, IIS.interrupt_count or 0)
+	Log("CombatEnd: checks=%d interrupts=%d", IIS.check_count, IISControl.InterruptCount())
 	ResetCombatState("CombatEnd")
 end
 
