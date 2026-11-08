@@ -102,6 +102,10 @@ function point_pack(p)
 	return p
 end
 
+function GetPackedPosAndStance(unit)
+	return string.format("packed %d,%d", unit.pos.x, unit.pos.y)
+end
+
 function GetPassSlab(p)
 	return p
 end
@@ -153,7 +157,21 @@ function WaitOtherCombatActionsEnd() return "vanilla" end
 IModeCombatMovement = { OnMouseButtonDown = function() return "vanilla" end }
 NetSyncEvents = { EndTurn = function() return "vanilla" end }
 NetSyncLocalEffects = { EndTurn = function() return "vanilla" end }
-OnMsg = {}
+-- Like the game, OnMsg keeps every handler that a file defines and runs them in the order of definition.
+local msg_handlers = {}
+OnMsg = setmetatable({}, {
+	__newindex = function(_, name, fn)
+		msg_handlers[name] = msg_handlers[name] or {}
+		table.insert(msg_handlers[name], fn)
+	end,
+	__index = function(_, name)
+		return function(...)
+			for _, fn in ipairs(msg_handlers[name] or {}) do
+				fn(...)
+			end
+		end
+	end,
+})
 
 dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
@@ -289,12 +307,24 @@ local function Steps(...)
 end
 
 -- Starts an interrupt with Q.Activate, as RunInterrupt does, without the engine calls around it.
-local function ActiveState(winners, mover, joiners)
-	local it = IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, joiners = joiners or {}, system = "IIS",
-		kind = "move", cfg = Q.Config }
+local function ActiveState(interrupters, mover)
+	local it = IISInterrupt.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = Q.Config }
 	Q.Activate(it)
 	return it
 end
+
+------------------------------------------------------------------------------------------------
+-- Game messages
+
+t.case("The OnMsg fake runs every handler for a message in the order of definition", function()
+	local calls = {}
+	function OnMsg.IISTestMessage(x) calls[#calls + 1] = "first " .. x end
+	function OnMsg.IISTestMessage(x) calls[#calls + 1] = "second " .. x end
+	OnMsg.IISTestMessage("a")
+	t.eq(#calls, 2)
+	t.eq(calls[1], "first a")
+	t.eq(calls[2], "second a")
+end)
 
 ------------------------------------------------------------------------------------------------
 -- Mover and watcher filters
@@ -670,7 +700,7 @@ end)
 t.case("CanBeControlled: a collective joiner is an interrupter", function()
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
-	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }))
 	t.eq(Unit.CanBeControlled(b), true)
 	b.down = true
 	t.eq(Unit.CanBeControlled(b), false)
@@ -685,7 +715,7 @@ end
 t.case("Tick selects the next interrupter that can act when the selected one goes down", function()
 	ResetWorld()
 	local a, b, c = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "c" })
-	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	local it = ActiveState({ a, b, c }, FakeUnit({ id = "enemy", team = enemy_team }))
 	FakeSelection(a)
 	Q.Tick(it, 100)
 	t.eq(SelectedObj, a)
@@ -698,7 +728,7 @@ end)
 t.case("SelectionChange selects an interrupter in place of another player unit", function()
 	ResetWorld()
 	local a, b, other = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "other" })
-	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }))
 	FakeSelection(b)
 	OnMsg.SelectionChange()
 	RunThreads()
@@ -752,6 +782,20 @@ t.case("StartCombatAction queues behind another interrupter and starts after it"
 	RunThreads()
 	t.eq(#ran_actions, 1) -- Move plays alongside a PostAction
 	t.eq(it:QueueLength(), 0)
+end)
+
+t.case("CombatActionEnd traces an enemy action and steps an interrupter action", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a" })
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
+	ActiveState({ a }, enemy)
+	Q.UI = { Refresh = function() end }
+	VisibilityUpdate = function() end
+	OnMsg.CombatActionEnd(enemy)
+	OnMsg.CombatActionEnd(a)
+	VisibilityUpdate = nil
+	t.eq(LogHas("enemy action ended: enemy#enemy"), true)
+	t.eq(LogHas("INT #1 merc a#a action ended"), true)
 end)
 
 t.case("StartCombatAction drops the queued action of a unit that died", function()
@@ -827,8 +871,8 @@ end)
 t.case("Activate returns the new shell with the dummy and the start AP of each interrupter", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 7000 })
-	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), winners = { a },
-		joiners = {}, system = "IIS", kind = "move", cfg = Q.Config }
+	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), interrupters = { a },
+		cfg = Q.Config }
 	local dummy = { pos = { x = 1, y = 0 } }
 	local sh = Q.Activate(it, dummy)
 	t.eq(Q.active, it)
@@ -842,7 +886,7 @@ t.case("DumpStuck logs the command stack of each busy interrupter that is not do
 	local b = FakeUnit({ id = "stuck_b", command = "FirearmAttack" })
 	local c = FakeUnit({ id = "stuck_c" })
 	b.down = true
-	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	local it = ActiveState({ a, b, c }, FakeUnit({ id = "enemy", team = enemy_team }))
 	Q.DumpStuck(it, "test")
 	t.eq(LogHas("merc stuck_a#stuck_a cmd=FirearmAttack"), true)
 	t.eq(LogHas("merc stuck_b#stuck_b"), false)
@@ -872,7 +916,7 @@ t.case("The END log line shows the Forced counts and the AP of each interrupter 
 	local b = FakeUnit({ id = "b", ap = 8500 })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
 	game_time = 1000
-	local it = ActiveState({ a }, enemy, { b })
+	local it = ActiveState({ a, b }, enemy)
 	Unit.CanBeControlled(a)
 	Unit.CanBeControlled(b)
 	IsNetPlayerTurn()
@@ -932,6 +976,23 @@ t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function(
 	Q.StopMover(it, { pos = { x = 1, y = 0 } })
 	t.eq(enemy.combat_path[1], "dest")
 	t.eq(enemy.iis_stopped, nil)
+end)
+
+t.case("One move-done message commits the move plan and re-plans a stopped mover", function()
+	local mover, a = IISSetup(10)
+	mover.in_cmd = true
+	mover.command_thread = "cmd"
+	local dummies = Path(mover, 6)
+	Q.AddTrigger(mover, "move", dummies)
+	mover.iis_stopped = "cmd"
+	mover.ai_context = { ai_destination = "far" }
+	mover.pos = dummies[4].pos
+	OnMsg.UnitMovementDone(mover)
+	t.eq(Mem.Counter(a, mover), 28) -- 10 + 3 steps of 6
+	t.eq(mover.ai_context.ai_destination, "packed 3,0")
+	t.eq(mover.iis_stopped, nil)
+	t.eq(LogHas("IIS commit"), true)
+	t.eq(LogHas("enemy enemy#enemy re%-plans from its tile"), true)
 end)
 
 t.case("CanSaveGameQuery blocks saves during an interrupt", function()
