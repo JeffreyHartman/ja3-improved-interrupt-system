@@ -747,37 +747,37 @@ function IIS.InterruptRequest(mover, entry, n)
 		Log("interrupt skipped: bad entry from an older version")
 		return
 	end
-	local mercs = {}
+	local winners = {}
 	for _, m in ipairs(info.mercs) do
 		if IsValid(m) and not m:IsIncapacitated() and not IIS.WinSkipReason(m, info.system) then
-			mercs[#mercs + 1] = m
+			winners[#winners + 1] = m
 		else
 			Log("interrupt: winner %s can no longer act, dropped", Name(m))
 		end
 	end
-	if #mercs == 0 then
+	if #winners == 0 then
 		Log("interrupt skipped: no winner of check #%d can act", info.check or 0)
 		return
 	end
 
+	-- AddCollective appends the joiners after the winners.
 	local interrupters = {}
-	for i, m in ipairs(mercs) do
+	for i, m in ipairs(winners) do
 		interrupters[i] = m
 	end
 	local joined = {}
 	if info.system == "IIS" and cfg.collective then
 		IIS.SafeCall(nil, "collective", function()
-			joined = AddCollective(mercs, mover, n)
+			joined = AddCollective(interrupters, mover, n)
 		end)
 	end
 	IIS.SafeCall(nil, "IIS memory", function()
 		local here = info.kind == "move" and dummy and dummy.pos or nil
-		IIS.LogCommit(Mem.Fired(mover, mercs, here), "interrupt #" .. n, mover)
+		IIS.LogCommit(Mem.Fired(mover, interrupters, here), "interrupt #" .. n, mover)
 	end)
 
 	local notes = {}
 	for _, m in ipairs(joined) do
-		interrupters[#interrupters + 1] = m
 		notes[m] = " (collective)"
 	end
 	return {
@@ -788,6 +788,12 @@ function IIS.InterruptRequest(mover, entry, n)
 		where = info.where,
 		notes = notes,
 	}
+end
+
+-- Control.lua loads after this file and defines IISControl.Handle. The game sends ModsReloaded
+-- after it runs the code files of all mods.
+function OnMsg.ModsReloaded()
+	IISControl.Handle("iis", IIS.InterruptRequest)
 end
 
 local orig_CheckProvokeOpportunityAttacks = Unit.CheckProvokeOpportunityAttacks
@@ -946,7 +952,7 @@ function OnMsg.CombatStart()
 end
 
 function OnMsg.CombatEnd()
-	Log("CombatEnd: checks=%d interrupts=%d", IIS.check_count, IIS.interrupt_count or 0)
+	Log("CombatEnd: checks=%d interrupts=%d", IIS.check_count, IISControl.InterruptCount())
 	ResetCombatState("CombatEnd")
 end
 
