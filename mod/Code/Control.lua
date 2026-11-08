@@ -1,6 +1,8 @@
--- Improved Interrupt System: runs an interrupt. The frozen enemy's command thread waits in
--- RunInterrupt while the interrupters take orders. End Turn (Enter) ends the interrupt. The
--- overrides at the end of the file change behavior only while an interrupt is active.
+-- Improved Interrupt System: runs an interrupt. The wrapper of
+-- Unit:ProvokeOpportunityAttacksFromList passes each entry to the handler of its entry type, and
+-- the frozen enemy's command thread waits in it while the interrupters take orders. End Turn
+-- (Enter) ends the interrupt. The overrides at the end of the file change behavior only while an
+-- interrupt is active.
 
 local R = IISRules
 local E = IIS.E
@@ -213,49 +215,10 @@ end
 ------------------------------------------------------------------------------------------------
 -- Interrupt lifecycle
 
--- IIS collective interrupts (Soldier Control.cpp:24960): teammates within 5 tiles of an original
--- winner join it by chance.
-local function AddCollective(st_mercs, mover, n)
-	local rc = IIS.RulesConfig()
-	local originals = {}
-	for i, m in ipairs(st_mercs) do
-		originals[i] = m
-	end
-	local joined = {}
-	for _, leader in ipairs(originals) do
-		for _, mate in ipairs(E.PlayerUnits()) do
-			local skip = table.find(st_mercs, mate) and "interrupter"
-				or IIS.ObserverSkipReason(mate, mover) or IIS.WinSkipReason(mate, "IIS")
-			if not skip then
-				local dist = E.DistTiles(leader, mate:GetPos())
-				if dist > rc.collective_radius then
-					skip = string.format("%d tiles away (max %d)", dist, rc.collective_radius)
-				end
-			end
-			if skip then
-				if skip ~= "interrupter" then
-					Log("INT #%d collective: %s -> %s skipped: %s", n, Name(leader), Name(mate), skip)
-				end
-			else
-				local chance = R.CollectiveChance(
-					{ leadership = leader:GetProperty("Leadership"), level = leader:GetLevel() },
-					{ level = mate:GetLevel(), agility = mate:GetProperty("Agility"), wisdom = mate:GetProperty("Wisdom") })
-				local roll = E.Rand(100)
-				local ok = roll < chance
-				Log("INT #%d collective: %s -> %s chance=%d roll=%d %s", n, Name(leader), Name(mate), chance, roll, ok and "JOINS" or "no")
-				if ok then
-					st_mercs[#st_mercs + 1] = mate
-					joined[#joined + 1] = mate
-				end
-			end
-		end
-	end
-	return joined
-end
-
--- Returns the raw Free Move AP that the unit lost. The FreeMove status consumes the AP when it is
--- removed, and the second branch covers Free Move AP without the status.
-function IIS.RemoveFreeMove(u)
+--- Removes the Free Move AP of `u` and returns the raw Free Move AP that it lost.
+-- The FreeMove status consumes the AP when it is removed, and the second branch covers Free Move
+-- AP without the status.
+function IISControl.RemoveFreeMove(u)
 	local free = u.free_move_ap or 0
 	if free <= 0 then return 0 end
 	u:RemoveStatusEffect("FreeMove")
@@ -267,71 +230,37 @@ function IIS.RemoveFreeMove(u)
 	return free
 end
 
-function IIS.RunInterrupt(mover, info, dummy)
+local handlers = {}
+
+--- Sets the handler for the provoke-list entries of type `entry_type`, or removes it when
+-- `handler` is nil.
+-- The provoke-list wrapper calls `handler(mover, entry, n)` after its own checks pass. `n` is the
+-- number that the interrupt gets if it starts. The handler returns nil to start no interrupt, or
+-- a request with these fields:
+--   `interrupters`: the units that act, the top interrupter first
+--   `dummy`: the step of the mover's path where the interrupt caught it, or nil
+--   `stop`: true to stop the mover at `dummy` when the interrupt ends
+--   `label`, `where`: the text of the BEGIN log line before and after the mover's state
+--   `notes`: an optional text for each interrupter, at the end of its interrupter log line
+function IISControl.Handle(entry_type, handler)
+	handlers[entry_type] = handler
+end
+
+local function Run(mover, req, n)
 	local cfg = IIS.Config
-	if type(info) ~= "table" or not info.mercs then
-		Log("interrupt skipped: bad entry from an older version")
-		return
-	end
-	if not can_yield() then
-		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
-		return
-	end
-	if active then
-		Log("interrupt skipped: INT #%d is still active", active:Number())
-		return
-	end
-	if not IsValid(mover) or mover:IsDead() then
-		Log("interrupt skipped: mover %s is gone", Name(mover))
-		return
-	end
-	local mercs = {}
-	for _, m in ipairs(info.mercs) do
-		if IsValid(m) and not m:IsIncapacitated() and not IIS.WinSkipReason(m, info.system) then
-			mercs[#mercs + 1] = m
-		else
-			Log("interrupt: winner %s can no longer act, dropped", Name(m))
-		end
-	end
-	if #mercs == 0 then
-		Log("interrupt skipped: no winner of check #%d can act", info.check or 0)
-		return
-	end
-
-	IIS.interrupt_count = IIS.interrupt_count + 1
-	local n = IIS.interrupt_count
-
-	local interrupters = {}
-	for i, m in ipairs(mercs) do
-		interrupters[i] = m
-	end
-	local joined = {}
-	if info.system == "IIS" and cfg.collective then
-		SafeCall(nil, "collective", function()
-			joined = AddCollective(mercs, mover, n)
-		end)
-	end
-	SafeCall(nil, "IIS memory", function()
-		local here = info.kind == "move" and dummy and dummy.pos or nil
-		IIS.LogCommit(IISMemory.Fired(mover, mercs, here), "interrupt #" .. n, mover)
-	end)
-
-	for _, m in ipairs(joined) do
-		interrupters[#interrupters + 1] = m
-	end
-	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = interrupters, cfg = cfg }
+	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = cfg }
 
 	local in_cmd = E.InCommandThread(mover)
-	Log("INT #%d BEGIN %s %s: mover=%s pos=%s ap=%s %s in_command_thread=%s", n, info.system, info.kind, Name(mover), Pos(mover),
-		AP(mover), info.where or "", tostring(in_cmd))
+	Log("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s in_command_thread=%s", n, req.label, Name(mover), Pos(mover),
+		AP(mover), req.where or "", tostring(in_cmd))
+	local notes = req.notes or empty_table
 	for i, m in ipairs(it:Interrupters()) do
-		local joined_mark = table.find(joined, m) and " (collective)" or ""
 		local free = 0
 		SafeCall(nil, "RemoveFreeMove", function()
-			free = IIS.RemoveFreeMove(m)
+			free = IISControl.RemoveFreeMove(m)
 		end)
 		local free_mark = free > 0 and string.format(" (free move %s removed)", IIS.FormatAP(free)) or ""
-		Log("INT #%d   interrupter %d: %s ap=%s%s%s", n, i, Name(m), AP(m), joined_mark, free_mark)
+		Log("INT #%d   interrupter %d: %s ap=%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark)
 	end
 	SafeCall(nil, "before log", function()
 		Log("INT #%d before: %s | ai_controller=%s awareness_pending=%s | %s", n, UIState(it),
@@ -347,7 +276,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 			IISControl.EndInterrupt(it, "mover_command_ended")
 		end)
 	end
-	local sh = IISControl.Activate(it, dummy)
+	local sh = IISControl.Activate(it, req.dummy)
 	SafeCall(it, "BeginControl", BeginControl, it, sh)
 	SafeCall(it, "UI.Begin", IIS.UI.Begin, it)
 	SafeCall(it, "control log", function()
@@ -383,10 +312,53 @@ function IIS.RunInterrupt(mover, info, dummy)
 	if in_cmd then
 		mover:PopAndCallDestructor()
 	end
-	if cfg.after_interrupt == "stop" and info.kind == "move" then
+	if req.stop then
 		SafeCall(it, "StopMover", IISControl.StopMover, it, sh.dummy)
 	end
 end
+
+local function Start(mover, entry, handler)
+	if not can_yield() then
+		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
+		return
+	end
+	if active then
+		Log("interrupt skipped: INT #%d is still active", active:Number())
+		return
+	end
+	if not IsValid(mover) or mover:IsDead() then
+		Log("interrupt skipped: mover %s is gone", Name(mover))
+		return
+	end
+	local n = IIS.interrupt_count + 1
+	local req = handler(mover, entry, n)
+	if not req then return end
+	IIS.interrupt_count = n
+	Run(mover, req, n)
+end
+
+local orig_ProvokeOpportunityAttacksFromList = Unit.ProvokeOpportunityAttacksFromList
+function Unit:ProvokeOpportunityAttacksFromList(list, ...)
+	local ours = false
+	for _, entry in ipairs(list or empty_table) do
+		local handler = handlers[entry[1]]
+		if handler then
+			ours = true
+			Start(self, entry, handler)
+		end
+	end
+	-- Vanilla ignores the "iis" entry type, adds it to passed_interrupts and ends the interrupt.
+	local result = orig_ProvokeOpportunityAttacksFromList(self, list, ...)
+	if ours then
+		Log("provoke list done: mover=%s interrupted=%s stopped=%s pos=%s ap=%s", Name(self), tostring(self.interrupted),
+			tostring(IISControl.IsStopped(self)), Pos(self), AP(self))
+	end
+	return result
+end
+IIS.provoke_hook = Unit.ProvokeOpportunityAttacksFromList
+
+-- IIS.lua loads before this file, so it cannot register its handler itself.
+IISControl.Handle("iis", IIS.InterruptRequest)
 
 -- Returns the end reason code of IISInterrupt, or "end_check_error" when the check fails.
 function IIS.CheckEnd(it)
