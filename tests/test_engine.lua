@@ -885,16 +885,16 @@ t.case("End Turn: first press asks to end, a second press while busy forces it",
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
 
-t.case("Activate returns the new shell with the dummy and the start AP of each interrupter", function()
+t.case("Activate returns the takeover state with the dummy and the counters with the start AP of each interrupter", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 7000 })
 	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), interrupters = { a },
 		cfg = Q.Config }
 	local dummy = { pos = { x = 1, y = 0 } }
-	local sh = IISControl.Activate(it, dummy)
+	local taken, counters = IISControl.Activate(it, dummy)
 	t.eq(IISControl.Active(), it)
-	t.eq(sh.dummy, dummy)
-	t.eq(sh.start_ap[a], 7000)
+	t.eq(taken.dummy, dummy)
+	t.eq(counters.start_ap[a], 7000)
 end)
 
 t.case("DumpStuck logs the command stack of each busy interrupter that is not down", function()
@@ -1075,7 +1075,8 @@ local function WalkingMover(counter)
 	function mover:InterruptBegin() end
 	function mover:SetAnimSpeedModifier() end
 	function mover:PushDestructor(f) destructors[#destructors + 1] = f end
-	function mover:PopAndCallDestructor() table.remove(destructors)() end
+	function mover:PopDestructor() table.remove(destructors) end
+	function mover:Destructors() return destructors end
 	return mover, a, dummies
 end
 
@@ -1217,4 +1218,131 @@ t.case("A handler that sends go on starts an interrupt, and the mover does not s
 	t.eq(LogHas("stops at"), false)
 	t.eq(vanilla_provoked[1], list)
 	game_time = 0
+end)
+
+-- Starts an interrupt through a "test" handler that catches the WalkingMover on a step that is not
+-- a valid object, as CombatGoto's path dummies are in the game.
+local function TestInterrupt(mover, a, script)
+	FakeControl(script)
+	local dummy = { pos = { x = 3, y = 0 }, valid = false }
+	IISControl.Handle("test", function()
+		return { interrupters = { a }, dummy = dummy, stop = false, label = "Test move" }
+	end)
+	Unit.ProvokeOpportunityAttacksFromList(mover, { { "test", a, nil, dummy } })
+	IISControl.Handle("test", nil)
+	game_time = 0
+	return dummy
+end
+
+t.case("After an interrupt, the visibility override, the camera locks and the player control have their old values", function()
+	local mover, a = WalkingMover(10)
+	local hidden_end = { pos = { x = 5, y = 0 }, valid = false }
+	mover.visibility_override = hidden_end
+	s_CameraMoveLockReasons = { cinematic = true }
+	g_Combat.is_player_control = false
+	local saved_lock, saved_unlock = LockCameraMovement, UnlockCameraMovement
+	function LockCameraMovement(reason) s_CameraMoveLockReasons[reason] = true end
+	function UnlockCameraMovement() s_CameraMoveLockReasons = {} end
+	local during = {}
+	local dummy = TestInterrupt(mover, a, {
+		{ at = 100, run = function()
+			during.override = mover.visibility_override
+			during.locked = next(s_CameraMoveLockReasons) ~= nil
+			during.control = g_Combat.is_player_control
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	LockCameraMovement, UnlockCameraMovement = saved_lock, saved_unlock
+	t.eq(during.override, dummy)
+	t.eq(during.locked, false)
+	t.eq(during.control, true)
+	t.eq(mover.visibility_override, hidden_end)
+	t.eq(s_CameraMoveLockReasons.cinematic, true)
+	t.eq(g_Combat.is_player_control, false)
+	s_CameraMoveLockReasons = {}
+end)
+
+-- Replaces the engine calls of the takeover with fakes that write each call to the returned list.
+-- The AI controller is a proxy, so each write of its tracked_pois field is a call too.
+local function RecordTakeover(mover)
+	local calls = {}
+	local saved = { VisibilityUpdate, LockCameraMovement, UnlockCameraMovement, g_Combat.SetPlayerControl,
+		g_AIExecutionController }
+	local push, pop = mover.PushDestructor, mover.PopDestructor
+	function mover:PushDestructor(f)
+		calls[#calls + 1] = "push destructor"
+		push(self, f)
+	end
+	function mover:PopDestructor()
+		calls[#calls + 1] = "pop destructor"
+		pop(self)
+	end
+	function VisibilityUpdate() calls[#calls + 1] = "visibility " .. tostring(mover.visibility_override.pos.x) end
+	function LockCameraMovement(reason) calls[#calls + 1] = "lock " .. reason end
+	function UnlockCameraMovement() calls[#calls + 1] = "unlock" end
+	g_Combat.SetPlayerControl = function(self, v)
+		self.is_player_control = v
+		calls[#calls + 1] = "player control " .. tostring(v)
+	end
+	local fields = { tracked_pois = "pois" }
+	g_AIExecutionController = setmetatable({}, {
+		__index = fields,
+		__newindex = function(_, k, v)
+			if k == "tracked_pois" then calls[#calls + 1] = "ai camera " .. tostring(v) end
+			fields[k] = v
+		end,
+	})
+	local function restore()
+		VisibilityUpdate, LockCameraMovement, UnlockCameraMovement, g_Combat.SetPlayerControl,
+			g_AIExecutionController = table.unpack(saved, 1, 5)
+	end
+	return calls, restore
+end
+
+t.case("The end gives back the engine state in the reverse order of the takes", function()
+	local mover, a = WalkingMover(10)
+	mover.visibility_override = { pos = { x = 5, y = 0 }, valid = false }
+	s_CameraMoveLockReasons = { cinematic = true }
+	g_Combat.is_player_control = false
+	local calls, restore = RecordTakeover(mover)
+	TestInterrupt(mover, a, { { at = 300, run = PressEndTurn } })
+	restore()
+	s_CameraMoveLockReasons = {}
+	t.eq(table.concat(calls, ", "), table.concat({
+		"push destructor", "visibility 3", "unlock", "ai camera false", "player control true",
+		"player control false", "ai camera pois", "lock cinematic", "visibility 5", "pop destructor",
+	}, ", "))
+	t.eq(#mover:Destructors(), 0)
+end)
+
+t.case("An error in one give-back is logged, and the other give-backs still run", function()
+	local mover, a = WalkingMover(10)
+	mover.visibility_override = { pos = { x = 5, y = 0 }, valid = false }
+	s_CameraMoveLockReasons = { cinematic = true }
+	g_Combat.is_player_control = false
+	local calls, restore = RecordTakeover(mover)
+	function LockCameraMovement() error("lock boom") end
+	TestInterrupt(mover, a, { { at = 300, run = PressEndTurn } })
+	restore()
+	s_CameraMoveLockReasons = {}
+	t.eq(LogHas("INT #%d+ restore camera failed: .*lock boom"), true)
+	t.eq(table.concat(calls, ", "), table.concat({
+		"push destructor", "visibility 3", "unlock", "ai camera false", "player control true",
+		"player control false", "ai camera pois", "visibility 5", "pop destructor",
+	}, ", "))
+	t.eq(LogHas("END %(end_request%)"), true)
+end)
+
+t.case("When the mover's command ends in an interrupt, its destructor ends the interrupt and gives back the state", function()
+	local mover, a = WalkingMover(10)
+	g_Combat.is_player_control = false
+	local pops = 0
+	function mover:PopDestructor() pops = pops + 1 end
+	TestInterrupt(mover, a, { { at = 200, run = function()
+		table.remove(mover:Destructors())()
+	end } })
+	t.eq(LogHas("END %(mover_command_ended%)"), true)
+	t.eq(IISControl.Active(), false)
+	t.eq(g_Combat.is_player_control, false)
+	t.eq(pops, 0)
 end)
