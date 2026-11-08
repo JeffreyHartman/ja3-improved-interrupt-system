@@ -1,6 +1,6 @@
 return PlaceObj('ModDef', {
 	'title', "Improved Interrupt System",
-	'description', "Proof of concept for player-controlled interrupts with the rules of JA2 1.13. During the enemy turn, a merc can win an interrupt by the 1.13 IIS rules or by the classic duel. The enemy stops, and the mercs that won take orders until you press End Turn. Then the enemy turn continues.",
+	'description', "Experimental. Player-controlled interrupts with the rules of JA2 1.13. During the enemy turn, a merc can win an interrupt by the 1.13 IIS rules or by the classic duel. The enemy stops, and the mercs that won take orders until you press End Turn. Then the enemy turn continues.",
 	'id', "ImprovedInterruptSystem",
 	'author', "jeff",
 	'version_major', 0,

@@ -1,5 +1,12 @@
 # Roadmap
 
+The mod will have two modes:
+
+- **JA2 1.13 interrupts (Experimental):** the current system. It changes the game balance a lot.
+- **Improved Overwatch:** a new mode. See [Improved Overwatch](#improved-overwatch).
+
+The mod can need a new name when it has two modes. This is not decided.
+
 ## Before the first Workshop release
 
 Release as a beta when all of these are done.
@@ -10,11 +17,17 @@ Release as a beta when all of these are done.
 - [ ] Play several full combats in a campaign, not only in the mod editor.
 - [ ] Decide how often interrupts must happen, and set the defaults (#2).
 - [ ] Add enemy interrupts. See [Enemy interrupts](#enemy-interrupts).
-- [ ] Decide what Overwatch does. See [Overwatch](#overwatch).
+- [ ] Decide what Overwatch does in the JA2 1.13 mode. See [Overwatch in the JA2 1.13 mode](#overwatch-in-the-ja2-113-mode).
 - [ ] Remove the "End Interrupt at 0 AP" and "Need AP for an attack" options, and always use both rules.
 - [ ] Check the GBO 4 Shooting Stance carry-over. GBO 4 saves the carried AP at the end of the turn, so AP that a merc spends in a later interrupt can carry over too.
-- [ ] Change the status line in the README from "early proof of concept" to beta.
+- [ ] Change the status line in the README to beta.
 - [ ] Bump the version.
+
+## Improved Overwatch
+
+Issue #17. When a merc's Overwatch triggers, the game pauses and the player takes control of that merc. The player can aim, choose another target, or not shoot. Then the enemy turn continues.
+
+The AI already uses Overwatch, so this mode needs no enemy interrupts. It can use the code that pauses the enemy turn and gives control to the player (`Control.lua`, `Interrupt.lua`). The open questions are in #17.
 
 ## Enemy interrupts
 
@@ -29,7 +42,7 @@ Open questions:
 
 Counter-interrupts (#16) need the same parts: the other team acts during an interrupt, and then control comes back. Build enemy interrupts so that #16 can use them.
 
-## Overwatch
+## Overwatch in the JA2 1.13 mode
 
 The mod does not change Overwatch now. A unit on Overwatch can also get an interrupt, so one unit can get two reactions to the same move.
 
