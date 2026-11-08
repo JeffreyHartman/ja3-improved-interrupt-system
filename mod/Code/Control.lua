@@ -9,6 +9,17 @@ local Log, Name, AP, Pos, NameList = IIS.Log, IIS.Name, IIS.AP, IIS.Pos, IIS.Nam
 IIS.active = false
 IIS.interrupt_count = IIS.interrupt_count or 0
 
+IISControl = IISControl or {}
+
+local sleep, can_yield
+
+--- Sets the engine functions that the interrupt calls.
+-- `sleep(ms)` waits for `ms` of game time in the mover's command thread, and `can_yield()` is true
+-- when the current thread can wait.
+function IISControl.Setup(o)
+	sleep, can_yield = o.sleep, o.can_yield
+end
+
 -- The engine state of the last interrupt that EndInterrupt restores, and the counters for its END
 -- log line. IIS.Activate replaces it at the start of each interrupt.
 local shell
@@ -102,6 +113,11 @@ IISInterrupt.Setup{
 	busy = RunsActionOrCommand,
 	ap_raw = function(u) return E.APRaw(u) end,
 	walk_ap = function() return E.WalkRaw() end,
+}
+
+IISControl.Setup{
+	sleep = function(ms) return Sleep(ms) end,
+	can_yield = function() return CanYield() end,
 }
 
 function IIS.DumpStuck(it, why)
@@ -244,7 +260,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 		Log("interrupt skipped: bad entry from an older version")
 		return
 	end
-	if not CanYield() then
+	if not can_yield() then
 		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
 		return
 	end
@@ -332,7 +348,7 @@ function IIS.RunInterrupt(mover, info, dummy)
 			IIS.EndInterrupt(it, reason)
 			break
 		end
-		Sleep(100)
+		sleep(100)
 		elapsed = elapsed + 100
 		SafeCall(it, "tick", IIS.Tick, it, elapsed)
 		if elapsed >= next_heartbeat then

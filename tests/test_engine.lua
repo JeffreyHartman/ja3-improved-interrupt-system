@@ -135,11 +135,14 @@ g_CurrentTeam = 2
 netUniqueId = 1
 
 local vanilla_result = {}
+local vanilla_provoked = {}
 Unit = {
 	CheckProvokeOpportunityAttacks = function()
 		return vanilla_result.interrupts, vanilla_result.idx
 	end,
-	ProvokeOpportunityAttacksFromList = function() end,
+	ProvokeOpportunityAttacksFromList = function(_, list)
+		vanilla_provoked[#vanilla_provoked + 1] = list
+	end,
 	CanBeControlled = function() return "vanilla" end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
 }
@@ -246,6 +249,7 @@ local function ResetWorld()
 		store = function() return gv_IIS end,
 	}
 	vanilla_result = {}
+	vanilla_provoked = {}
 	Q.Config.enabled = true
 	Q.Config.system = "IIS"
 	Q.Config.require_attack_ap = true
@@ -991,17 +995,6 @@ t.case("One move-done message commits the move plan and re-plans a stopped mover
 	t.eq(LogHas("enemy enemy#enemy re%-plans from its tile"), true)
 end)
 
-t.case("RunInterrupt skips a new interrupt while another one is active", function()
-	ResetWorld()
-	CanYield = function() return true end
-	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
-	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
-	Q.RunInterrupt(enemy, { mercs = { FakeUnit({ id = "b" }) } })
-	CanYield = nil
-	t.eq(LogHas("interrupt skipped: INT #1 is still active"), true)
-	t.eq(Q.active, it)
-end)
-
 t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	ResetWorld()
 	local query = {}
@@ -1010,4 +1003,125 @@ t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
 	OnMsg.CanSaveGameQuery(query)
 	t.eq(query.iis_interrupt, true)
+end)
+
+------------------------------------------------------------------------------------------------
+-- A full interrupt through the provoke-list wrapper
+
+g_Combat.SetPlayerControl = function(self, v) self.is_player_control = v end
+s_CameraMoveLockReasons = {}
+function VisibilityUpdate() end
+function UnlockCameraMovement() end
+function LockCameraMovement() end
+function HasVisibilityTo() return true end
+function GetInGameInterfaceMode() return "IModeCombatMovement" end
+function SetInGameInterfaceMode() end
+
+-- Each step of `script` is { at = game time in ms, run = function }. The fake sleep advances the
+-- game time and runs each step whose time has come. The captured log starts empty.
+local function FakeControl(script)
+	game_time = 0
+	log_lines = {}
+	local pending = { table.unpack(script or {}) }
+	IISControl.Setup{
+		sleep = function(ms)
+			game_time = game_time + ms
+			if game_time > 60000 then
+				error("the interrupt did not end in 60 s of game time")
+			end
+			while pending[1] and pending[1].at <= game_time do
+				table.remove(pending, 1).run()
+			end
+		end,
+		can_yield = function() return true end,
+	}
+	SelectObj = function(o) SelectedObj = o end
+	Q.UI = { Begin = function() end, End = function() end, Refresh = function() end }
+end
+
+local function PressEndTurn()
+	NetSyncEvents.EndTurn(netUniqueId)
+end
+
+-- The IISSetup mover, walking a path of 6 steps in its own CombatGoto command. Watcher a wins on
+-- step 4. The path costs 6 AP to the end and 3 AP to step 4.
+local function WalkingMover(counter)
+	local mover, a = IISSetup(counter)
+	local dummies = Path(mover, 6)
+	mover.in_cmd = true
+	mover.command = "CombatGoto"
+	mover.command_thread = "cmd"
+	mover.combat_path = { "dest", "mid", "start" }
+	mover.combat_path_obj = { GetAP = function(_, p) return p == "dest" and 6000 or 3000 end }
+	mover.start_move_free_ap = 0
+	local destructors = {}
+	function mover:InterruptBegin() end
+	function mover:SetAnimSpeedModifier() end
+	function mover:PushDestructor(f) destructors[#destructors + 1] = f end
+	function mover:PopAndCallDestructor() table.remove(destructors)() end
+	return mover, a, dummies
+end
+
+t.case("A move trigger: End Turn ends the interrupt with end_request and the mover stops", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	Q.Config.after_interrupt = "stop"
+	local n = Q.interrupt_count + 1
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	t.eq(list[1][1], "iis")
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(LogHas("INT #" .. n .. " BEGIN IIS move: mover=enemy#enemy"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: a#a"), true)
+	t.eq(LogHas("INT #" .. n .. " end requested %(End Turn%)%. busy=false"), true)
+	t.eq(LogHas("INT #" .. n .. " END %(end_request%): 300ms game time"), true)
+	t.eq(Q.active, false)
+	t.eq(#mover.combat_path, 1)
+	t.eq(mover.combat_path[1], dummies[4].pos)
+	t.eq(mover.ActionPoints, 13000)
+	t.eq(LogHas("INT #" .. n .. " enemy enemy#enemy stops at"), true)
+	t.eq(vanilla_provoked[1], list)
+	game_time = 0
+end)
+
+t.case("While another interrupt is active, a new iis entry starts no interrupt and rolls no collective", function()
+	local mover, a, dummies = WalkingMover(10)
+	local mate = FakeUnit({ id = "mate", pos = { x = 1, y = 6 } })
+	world.players = { a, mate }
+	FakeControl()
+	local count = Q.interrupt_count
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+	t.eq(list[1][1], "iis")
+	local other = ActiveState({ FakeUnit({ id = "b" }) }, FakeUnit({ id = "other", team = enemy_team }))
+	local rolls = 0
+	local orig_rand = E.Rand
+	E.Rand = function() rolls = rolls + 1 return 0 end
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	E.Rand = orig_rand
+	t.eq(LogHas("interrupt skipped: INT #1 is still active"), true)
+	t.eq(Q.active, other)
+	t.eq(Q.interrupt_count, count)
+	t.eq(rolls, 0)
+	t.eq(LogHas("collective"), false)
+	t.eq(#mover.combat_path, 3)
+	t.eq(vanilla_provoked[1], list)
+end)
+
+t.case("A vanilla overwatch entry goes to vanilla unchanged", function()
+	local mover, a, dummies = WalkingMover(10)
+	FakeControl()
+	local count = Q.interrupt_count
+	local entry = { "overwatch", a, "attack args", dummies[2] }
+	local list = { entry }
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	t.eq(#vanilla_provoked, 1)
+	t.eq(vanilla_provoked[1], list)
+	t.eq(#list, 1)
+	t.eq(list[1], entry)
+	t.eq(entry[1], "overwatch")
+	t.eq(entry[2], a)
+	t.eq(entry[3], "attack args")
+	t.eq(entry[4], dummies[2])
+	t.eq(Q.interrupt_count, count)
+	t.eq(Q.active, false)
+	t.eq(#log_lines, 0)
 end)
