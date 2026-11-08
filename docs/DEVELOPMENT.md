@@ -22,6 +22,8 @@ The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a
 
 The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
 
+When the interrupt starts, `IISControl` takes engine state from the game, and it gives the state back when the interrupt ends. The takeover list in `Control.lua` holds each take together with its give-back: the mover destructor, the visibility override, the camera locks, the AI camera fields and the player control. The start runs the list from the top, and the end runs it from the bottom. An error in one give-back is logged, and the other give-backs still run. The selection and the interface mode are taken but not given back. The counters for the `END` log line are in a separate table.
+
 After the handlers, the wrapper gives the full list to vanilla. Vanilla ignores the `"iis"` entry type. An entry type with no handler, such as a vanilla `"overwatch"` entry, goes to vanilla unchanged.
 
 These overrides change behavior only while an interrupt is active:
