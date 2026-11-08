@@ -102,6 +102,10 @@ function point_pack(p)
 	return p
 end
 
+function GetPassSlab(p)
+	return p
+end
+
 function ObjModified() end
 function IsValidThread() return false end
 function IsSetpiecePlaying() return false end
@@ -846,14 +850,14 @@ t.case("An error in the end check ends the interrupt with end_check_error", func
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
 	function enemy:IsDead() error("boom") end
 	local it = ActiveState({ a }, enemy)
-	local ui_reason
-	Q.UI = { End = function(_, reason) ui_reason = reason end }
+	local ui_ended = false
+	Q.UI = { End = function() ui_ended = true end }
 	local reason = Q.CheckEnd(it)
 	t.eq(reason, "end_check_error")
 	t.eq(LogHas("EndReason failed: .*boom"), true)
 	Q.EndInterrupt(it, reason)
 	t.eq(LogHas("INT #1 END %(end_check_error%)"), true)
-	t.eq(ui_reason, "end_check_error")
+	t.eq(ui_ended, true)
 	t.eq(Q.active, false)
 end)
 
@@ -891,6 +895,27 @@ t.case("StopMover keeps the enemy on its tile and refunds the AP of the rest of 
 	t.eq(enemy.ActionPoints, 5000)
 	t.eq(enemy.iis_stopped, "cmd")
 	t.eq(LogHas("stops at"), true)
+end)
+
+t.case("StopMover snaps a stop between two tiles to the pass slab and refunds from that tile", function()
+	ResetWorld()
+	local between, tile = { x = 3.4, y = 0 }, { x = 3, y = 0 }
+	local saved = GetPassSlab
+	GetPassSlab = function(p) return p == between and tile or nil end
+	local enemy = FakeUnit({ id = "enemy", team = enemy_team, ap = 2000, command = "CombatGoto", thread = "cmd" })
+	enemy.in_cmd = true
+	enemy.combat_path = { "dest", "mid", "start" }
+	enemy.combat_path_obj = { GetAP = function(_, p)
+		if p == "dest" then return 6000 end
+		if p == tile then return 3000 end
+	end }
+	enemy.start_move_free_ap = 0
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, enemy)
+	Q.StopMover(it, { pos = between })
+	GetPassSlab = saved
+	t.eq(#enemy.combat_path, 1)
+	t.eq(enemy.combat_path[1], tile)
+	t.eq(enemy.ActionPoints, 5000)
 end)
 
 t.case("StopMover leaves an enemy alone when it is not in CombatGoto", function()

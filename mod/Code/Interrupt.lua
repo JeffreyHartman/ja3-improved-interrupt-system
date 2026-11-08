@@ -227,8 +227,7 @@ end
 
 --- The end reason code when the interrupt ends now, or nil while it goes on.
 -- The codes are "combat_ended", "mover_dead", "interrupters_down", "forced_end", "end_request"
--- and "auto_end". UI.lua maps each code to the combat log text.
--- Control.lua also passes "end_check_error" and "mover_command_ended" to the UI.
+-- and "auto_end". Control.lua also logs "end_check_error" and "mover_command_ended".
 function Interrupt:EndReason()
 	local cfg = self.cfg
 	if not in_combat() then return "combat_ended" end

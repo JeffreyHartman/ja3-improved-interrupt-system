@@ -1,7 +1,7 @@
 return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "Enabled",
-		'DisplayName', "Interrupts enabled",
+		'DisplayName', "JA2 1.13 interrupts (Experimental)",
 		'Help', "Off: no interrupts. The mod stays loaded because saves turn it back on.",
 		'DefaultValue', true,
 	}),

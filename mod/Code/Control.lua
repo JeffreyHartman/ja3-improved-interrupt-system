@@ -416,7 +416,7 @@ function IIS.EndInterrupt(it, reason)
 			g_Combat:SetPlayerControl(sh.saved_player_control)
 		end
 	end)
-	SafeCall(it, "UI.End", IIS.UI.End, it, reason)
+	SafeCall(it, "UI.End", IIS.UI.End, it)
 
 	local forced = {}
 	for k, v in pairs(sh.forced) do
@@ -449,12 +449,17 @@ function IIS.StopMover(it, dummy)
 		Log("INT #%d enemy %s not stopped: no path", it:Number(), Name(mover))
 		return
 	end
-	local here = point_pack(dummy.pos)
+	-- A walk step between two path nodes can lie between tiles, and paths_ap has costs only for tiles.
+	local tile = GetPassSlab(dummy.pos) or dummy.pos
+	local here = point_pack(tile)
 	local refund = 0
 	local obj = mover.combat_path_obj
 	if obj then
 		local prev_cost = obj:GetAP(path[1])
 		local new_cost = obj:GetAP(here)
+		if not new_cost then
+			Log("INT #%d enemy %s: no path cost at the stop tile %s, no refund", it:Number(), Name(mover), tostring(tile))
+		end
 		if prev_cost and new_cost and new_cost < prev_cost then
 			refund = prev_cost - new_cost
 			mover:GainAP(refund)
@@ -471,7 +476,7 @@ function IIS.StopMover(it, dummy)
 	path[1] = here
 	mover.iis_stopped = mover.command_thread
 	Log("INT #%d enemy %s stops at %s (%d path nodes dropped), refund=%s AP, ap now %s", it:Number(), Name(mover),
-		tostring(dummy.pos), steps_left - 1, IIS.FormatAP(refund), AP(mover))
+		tostring(tile), steps_left - 1, IIS.FormatAP(refund), AP(mover))
 end
 
 -- The AI plays its attacks from ai_context.ai_destination (AIPlayAttacks, CombatAI.lua:211), so a

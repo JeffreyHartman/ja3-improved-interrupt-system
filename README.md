@@ -2,7 +2,7 @@
 
 A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the enemy turn, your mercs can interrupt the enemy. The enemy stops, and you give orders to the mercs that interrupted.
 
-> **Status:** early proof of concept. Expect bugs.
+> **Status:** experimental. Interrupts change the game balance a lot, and bugs are possible.
 
 ## Features
 
@@ -56,6 +56,8 @@ Made for vanilla JA3 and for Rato's Gameplay Balance and Overhaul 4. Co-op is no
 - Counter-interrupts
 - Interrupts from noise
 - The 1.13 watched-location bonus
+
+See [ROADMAP.md](ROADMAP.md) for the plan.
 
 ## Development
 

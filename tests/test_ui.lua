@@ -1,6 +1,6 @@
--- Tests for the combat log text of IIS.UI.End (mod/Code/UI.lua).
+-- Tests for the combat log text of IIS.UI.Begin and IIS.UI.End (mod/Code/UI.lua).
 -- run.lua runs this file after test_engine.lua, which loads IIS.lua and Control.lua. The fakes
--- here cover only what UI.lua needs to load and what UI.End calls.
+-- here cover only what UI.lua needs to load and what UI.Begin and UI.End call.
 
 local t = Test
 
@@ -25,24 +25,29 @@ end
 
 dofile("mod/Code/UI.lua")
 
-local function EndText(code)
+local function Merc(name)
+	return { session_id = name }
+end
+
+local function BeginText(names)
 	combat_log = {}
-	IIS.UI.End(IISInterrupt.Begin{ n = 1, mover = {}, winners = {}, system = "IIS", kind = "move", cfg = IIS.Config }, code)
+	local winners = {}
+	for i, name in ipairs(names) do
+		winners[i] = Merc(name)
+	end
+	local mover = { GetLogName = function() return "Legion Goon" end }
+	IIS.UI.Begin(IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, system = "IIS", kind = "move", cfg = IIS.Config })
 	return combat_log[1]
 end
 
-t.case("UI.End: the combat log text for each end reason code", function()
-	local expected = {
-		combat_ended = "combat ended",
-		mover_dead = "enemy dead",
-		interrupters_down = "all interrupters are down",
-		forced_end = "forced: End Turn pressed again while a merc was busy",
-		end_request = "player ended the interrupt",
-		auto_end = "interrupters are out of AP (auto end)",
-		end_check_error = "error in EndReason",
-		mover_command_ended = "enemy command ended (destructor)",
-	}
-	for code, reason in pairs(expected) do
-		t.eq(EndText(code), "Interrupt over (" .. reason .. "). The enemy turn continues.", code)
-	end
+t.case("UI.Begin: the combat log names the interrupters and the enemy", function()
+	t.eq(BeginText({ "Pie" }), "Pie interrupts Legion Goon.")
+	t.eq(BeginText({ "Pie", "Livewire" }), "Pie and Livewire interrupt Legion Goon.")
+	t.eq(BeginText({ "Pie", "Livewire", "Blood" }), "Pie, Livewire and Blood interrupt Legion Goon.")
+end)
+
+t.case("UI.End: the combat log text is the same for every end reason", function()
+	combat_log = {}
+	IIS.UI.End(IISInterrupt.Begin{ n = 1, mover = {}, winners = {}, system = "IIS", kind = "move", cfg = IIS.Config })
+	t.eq(combat_log[1], "Interrupt over.")
 end)
