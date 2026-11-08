@@ -284,9 +284,8 @@ local function Steps(...)
 end
 
 -- Starts an interrupt with Q.Activate, as RunInterrupt does, without the engine calls around it.
-local function ActiveState(winners, mover, joiners)
-	local it = IISInterrupt.Begin{ n = 1, mover = mover, winners = winners, joiners = joiners or {}, system = "IIS",
-		kind = "move", cfg = Q.Config }
+local function ActiveState(interrupters, mover)
+	local it = IISInterrupt.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = Q.Config }
 	Q.Activate(it)
 	return it
 end
@@ -665,7 +664,7 @@ end)
 t.case("CanBeControlled: a collective joiner is an interrupter", function()
 	ResetWorld()
 	local a, b = FakeUnit({ id = "a" }), FakeUnit({ id = "b" })
-	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }))
 	t.eq(Unit.CanBeControlled(b), true)
 	b.down = true
 	t.eq(Unit.CanBeControlled(b), false)
@@ -680,7 +679,7 @@ end
 t.case("Tick selects the next interrupter that can act when the selected one goes down", function()
 	ResetWorld()
 	local a, b, c = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "c" })
-	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	local it = ActiveState({ a, b, c }, FakeUnit({ id = "enemy", team = enemy_team }))
 	FakeSelection(a)
 	Q.Tick(it, 100)
 	t.eq(SelectedObj, a)
@@ -693,7 +692,7 @@ end)
 t.case("SelectionChange selects an interrupter in place of another player unit", function()
 	ResetWorld()
 	local a, b, other = FakeUnit({ id = "a" }), FakeUnit({ id = "b" }), FakeUnit({ id = "other" })
-	ActiveState({ a }, FakeUnit({ id = "enemy", team = enemy_team }), { b })
+	ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }))
 	FakeSelection(b)
 	OnMsg.SelectionChange()
 	RunThreads()
@@ -822,8 +821,8 @@ end)
 t.case("Activate returns the new shell with the dummy and the start AP of each interrupter", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 7000 })
-	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), winners = { a },
-		joiners = {}, system = "IIS", kind = "move", cfg = Q.Config }
+	local it = IISInterrupt.Begin{ n = 1, mover = FakeUnit({ id = "enemy", team = enemy_team }), interrupters = { a },
+		cfg = Q.Config }
 	local dummy = { pos = { x = 1, y = 0 } }
 	local sh = Q.Activate(it, dummy)
 	t.eq(Q.active, it)
@@ -837,7 +836,7 @@ t.case("DumpStuck logs the command stack of each busy interrupter that is not do
 	local b = FakeUnit({ id = "stuck_b", command = "FirearmAttack" })
 	local c = FakeUnit({ id = "stuck_c" })
 	b.down = true
-	local it = ActiveState({ a, b }, FakeUnit({ id = "enemy", team = enemy_team }), { c })
+	local it = ActiveState({ a, b, c }, FakeUnit({ id = "enemy", team = enemy_team }))
 	Q.DumpStuck(it, "test")
 	t.eq(LogHas("merc stuck_a#stuck_a cmd=FirearmAttack"), true)
 	t.eq(LogHas("merc stuck_b#stuck_b"), false)
@@ -867,7 +866,7 @@ t.case("The END log line shows the Forced counts and the AP of each interrupter 
 	local b = FakeUnit({ id = "b", ap = 8500 })
 	local enemy = FakeUnit({ id = "enemy", team = enemy_team })
 	game_time = 1000
-	local it = ActiveState({ a }, enemy, { b })
+	local it = ActiveState({ a, b }, enemy)
 	Unit.CanBeControlled(a)
 	Unit.CanBeControlled(b)
 	IsNetPlayerTurn()

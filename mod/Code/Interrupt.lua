@@ -20,13 +20,11 @@ local Interrupt = {}
 Interrupt.__index = Interrupt
 
 --- Starts an interrupt and returns its Interrupt object.
--- `o` has `n`, `mover`, `winners`, `joiners`, `system`, `kind` and `cfg` (IIS.Config).
+-- `o` has `n`, `mover`, `interrupters` (the first one is the top interrupter) and `cfg` (IIS.Config).
 function M.Begin(o)
 	local it = setmetatable({
 		n = o.n,
 		mover = o.mover,
-		system = o.system,
-		kind = o.kind,
 		cfg = o.cfg,
 		interrupters = {},
 		is_interrupter = {},
@@ -37,11 +35,9 @@ function M.Begin(o)
 		forced_end = false,
 		busy_ms = 0,
 	}, Interrupt)
-	for _, list in ipairs{ o.winners, o.joiners or {} } do
-		for _, u in ipairs(list) do
-			it.interrupters[#it.interrupters + 1] = u
-			it.is_interrupter[u] = true
-		end
+	for _, u in ipairs(o.interrupters) do
+		it.interrupters[#it.interrupters + 1] = u
+		it.is_interrupter[u] = true
 	end
 	return it
 end
@@ -56,17 +52,7 @@ function Interrupt:Mover()
 	return self.mover
 end
 
---- The interrupt system that started the interrupt: "IIS" or "Classic".
-function Interrupt:System()
-	return self.system
-end
-
---- The trigger kind: "move" or "attack".
-function Interrupt:Kind()
-	return self.kind
-end
-
---- True when `u` is a winner or a joiner.
+--- True when `u` is an interrupter.
 function Interrupt:IsInterrupter(u)
 	return u ~= nil and self.is_interrupter[u] or false
 end
@@ -76,12 +62,12 @@ function Interrupt:CanAct(u)
 	return self:IsInterrupter(u) and can_act(u)
 end
 
---- The first winner.
+--- The top interrupter: the first one in the list from Begin.
 function Interrupt:Top()
 	return self.interrupters[1]
 end
 
---- The winners and then the joiners, as a new list.
+--- The interrupters in the order from Begin, as a new list.
 function Interrupt:Interrupters()
 	local list = {}
 	for i, u in ipairs(self.interrupters) do
