@@ -33,7 +33,7 @@ A teammate near a winner that enters the interrupt through a collective roll. It
 _Avoid_: collective winner
 
 **Interrupter**:
-A unit that acts in an interrupt: a winner or a joiner.
+A unit that acts in an interrupt. In the 1.13 mode, an interrupter is a winner or a joiner.
 _Avoid_: merc (as a role)
 
 **Merc**:

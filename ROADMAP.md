@@ -11,8 +11,6 @@ The mod can need a new name when it has two modes. This is not decided.
 
 Release as a beta when all of these are done.
 
-- [ ] Finish the in-game play test (#14). The play test did not show `forced_end`, `auto_end`, `interrupters_down` or the queue with two interrupters yet.
-- [ ] Check in game that an interrupter loses its Free Move AP.
 - [ ] Save and load after a combat with interrupts. The IIS counters are in the save, so each update must load older saves.
 - [ ] Play several full combats in a campaign, not only in the mod editor.
 - [ ] Decide how often interrupts must happen, and set the defaults (#2).
