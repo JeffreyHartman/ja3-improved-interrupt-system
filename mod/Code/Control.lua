@@ -350,6 +350,8 @@ IISControl.HANDLED = "iis_handled"
 --     can start an action only when its limit returns true.
 --   `aim_limit`: optional, the percent of its maximum aim level that each interrupter can use
 --     (Aim.lua)
+--   `free_aim(unit, action, target)`: optional, the number of aim levels that the minimum aim
+--     level of each interrupter's shot is at least. These levels cost no AP (Aim.lua).
 function IISControl.Handle(entry_type, handler)
 	handlers[entry_type] = handler
 end
