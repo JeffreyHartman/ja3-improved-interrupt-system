@@ -27,6 +27,7 @@ IIS.Config = {
 	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
+	ios = false,                 -- IOS: the Overwatch trigger of a merc starts an interrupt (IOS.lua)
 }
 
 -- The game loads mod options before this code runs.
@@ -42,6 +43,7 @@ local function ApplyOptions()
 	cfg.reaction_time = tonumber(o.ReactionTime) or 25
 	cfg.basic_pct = tonumber(o.BasicPercent) or 60
 	cfg.log_checks = o.VerboseLog == true
+	cfg.ios = o.IOS == true
 end
 ApplyOptions()
 
@@ -1011,9 +1013,9 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: enabled=%s system=%s collective=%s after_interrupt=%s auto_end=%s require_attack_ap=%s reaction_time=%s basic_pct=%s verbose=%s",
+	Log("%s: enabled=%s system=%s collective=%s after_interrupt=%s auto_end=%s require_attack_ap=%s reaction_time=%s basic_pct=%s verbose=%s ios=%s",
 		why, tostring(c.enabled), c.system, tostring(c.collective), c.after_interrupt, tostring(c.auto_end),
-		tostring(c.require_attack_ap), tostring(c.reaction_time), tostring(c.basic_pct), tostring(c.log_checks))
+		tostring(c.require_attack_ap), tostring(c.reaction_time), tostring(c.basic_pct), tostring(c.log_checks), tostring(c.ios))
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks
