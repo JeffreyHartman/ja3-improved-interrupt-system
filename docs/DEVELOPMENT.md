@@ -12,8 +12,9 @@
 | `mod/Code/IOS.lua` | `IOS`: the handler for `"overwatch"` entries and the AP pool of each overwatcher. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
 | `mod/Code/MovingTarget.lua` | The "Moving target" to-hit modifier for a shot by an interrupter at the mover. |
+| `mod/Code/Aim.lua` | The wrap of `Unit:GetBaseAimLevelRange` that applies the aim limit of the active interrupt. |
 
-`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `IOS.lua`, `UI.lua`, `MovingTarget.lua`. `IOS.lua` adds its engine reads to `IIS.E` and calls `IISControl.Handle`, so it loads after `Control.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
+`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `IOS.lua`, `UI.lua`, `MovingTarget.lua`, `Aim.lua`. `IOS.lua` adds its engine reads to `IIS.E` and calls `IISControl.Handle`, so it loads after `Control.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
 
 The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"` entry to the vanilla interrupt list. It returns nothing for a mover that the Stop stopped. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
 
@@ -33,6 +34,7 @@ A request can also have these fields for each interrupter:
 | `ap_grants[unit]` | A raw AP value. At the start, `IISControl` sets the interrupter's AP to the grant. At the end, it puts back the AP that the interrupter had before the grant. It writes `ActionPoints` directly, because `Unit:GainAP` does nothing for a unit on Overwatch. The AP of a queued action that did not start goes back to the grant in the same way. |
 | `on_end(ap_left)` | A function. At the end, `IISControl` calls it with the raw AP that each granted interrupter had left. |
 | `banner` | A text. The banner shows "`banner`: interrupter names" in place of "INTERRUPT!". |
+| `aim_limit` | A percent. The maximum aim level of each interrupter is this percent of the maximum that the game gives, rounded up, and never below the minimum. The `"iis"` handler gives the "Interrupt aim limit" option, and the `"overwatch"` handler gives the "IOS aim limit" option, both read when the interrupt starts. |
 | `action_limits[unit]` | A function `limit(action_id, target)`. The `StartCombatAction` override calls it before it takes the AP. When the limit does not return true, or fails, the action does not start and costs no AP. |
 
 The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter in `IIS.lua`. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
@@ -48,6 +50,8 @@ The handler for `"overwatch"` entries is `IOS.InterruptRequest` in `IOS.lua`. `I
 `IOS.IsOverwatcher(unit)` is true while an IOS interrupt is active and `unit` is one of its overwatchers. The wrapper of `Unit:PrepareAttackArgs` in `IOS.lua` sets `opportunity_attack = true` and `opportunity_attack_type = "Overwatch"` in the attack args of an overwatcher's firearm attack. The crosshair's to-hit preview and `Unit:FirearmAttack` both get their attack args from `Unit:PrepareAttackArgs`, through `CombatAction:GetActionResults`. Thus the Overwatch to-hit modifier, the vanilla crit rule and the Overwatch perks apply to the shot, and under GBO 4 Settled does not. A shot by an IIS or JA2 Classic interrupter does not get the flag. GBO 4 also wraps `Unit:PrepareAttackArgs`, so the load order of the two mods does not matter.
 
 The pool is in the Overwatch state, `g_Overwatch[unit]`, which the game saves. `ios_pool` is the raw AP, and `ios_count` and `ios_turn` are the attack count and the combat turn when IOS stored it. When the game changed the attack count or the turn since then, or when the state has no pool (a save from before IOS), the pool is `num_attacks` multiplied by the cost of one default attack. Thus a set-up machine gun gets its pool from the attack count that the game calculates again at each turn start. The handler gets each cost from `E.AttackCostRaw`, a live game call.
+
+`Aim.lua` wraps `Unit:GetBaseAimLevelRange` on `ModsReloaded`, and `IISControl.Request()` gives it the request of the active interrupt. The wrap calls the function that was in place and changes its result only while an interrupt is active, for an interrupter, when the request has an `aim_limit`. GBO 4 replaces the function when its code loads, and its version calls the vanilla one. Thus, in either load order, the chain is the wrap of this mod, then GBO 4, then vanilla. The wrap checks its identity, so a second `ModsReloaded` does not wrap it again.
 
 When the interrupt starts, `IISControl` takes engine state from the game, and it gives the state back when the interrupt ends. The takeover list in `Control.lua` holds each take together with its give-back: the mover destructor, the visibility override, the camera locks, the AI camera fields and the player control. The start runs the list from the top, and the end runs it from the bottom. An error in one give-back is logged, and the other give-backs still run. The selection and the interface mode are taken but not given back. The counters for the `END` log line are in a separate table.
 
@@ -102,6 +106,8 @@ Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
 - `tests/test_ui.lua` loads `UI.lua` and checks the combat log text at the start and end of an interrupt, and the banner text of a request.
 - `tests/test_moving_target.lua` loads `MovingTarget.lua` and calls the `CalcValue` of its to-hit modifier with fake units and an active interrupt.
 
+`tests/test_engine.lua` also loads `Aim.lua`. Its aim limit tests call the wrapped `Unit:GetBaseAimLevelRange` during an IOS or IIS interrupt through the provoke-list wrapper, also over a fake GBO 4 wrap.
+
 The tests do not cover the rest of `UI.lua` or anything that needs the game.
 
 ## Testing in the game
@@ -127,6 +133,8 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 | `INT #N overwatcher` | The pool and the attack count of an overwatcher after an IOS interrupt, or the reason that its Overwatch ended. |
 | `INT #N ... refused by the action limit` | The interrupter's action limit refused an action, for example a move by an overwatcher with "IOS actions = Shot only". The action did not start and cost no AP. |
 | `IOS: overwatcher ... cannot pay for an attack` | The pool of a merc on Overwatch is below the cost of one attack, so vanilla gets its entry. |
+| `aim range hook: ours` | `Aim.lua` wrapped `Unit:GetBaseAimLevelRange` on `ModsReloaded`. `REPLACED` means that another mod replaced the wrap. |
+| `INT #N aim limit failed` | The aim limit failed with a Lua error. The shot gets the aim range of the game. |
 | `INT #- <type> handler failed` | A provoke-list handler failed. Vanilla gets the entries of that group. |
 | `INT #N collective` | A collective interrupt roll, or the reason that a teammate did not roll. |
 | `INT #N run action`, `action ended` | An interrupter action started or ended. |

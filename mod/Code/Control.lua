@@ -44,6 +44,11 @@ end
 -- interrupt.
 local taken, counters, request
 
+--- Returns the handler's request of the active interrupt, or nil when no interrupt is active.
+function IISControl.Request()
+	return active and request or nil
+end
+
 --- Makes `it` the active interrupt and returns two new tables for it: the engine state that the
 -- takeover list takes, and the counters for the END log line.
 -- `dummy` is the step of the mover's path where the interrupt caught it, or nil. `req` is the
@@ -341,6 +346,8 @@ IISControl.HANDLED = "iis_handled"
 --     had left
 --   `action_limits`: an optional `limit(action_id, target)` for each interrupter. The interrupter
 --     can start an action only when its limit returns true.
+--   `aim_limit`: optional, the percent of its maximum aim level that each interrupter can use
+--     (Aim.lua)
 function IISControl.Handle(entry_type, handler)
 	handlers[entry_type] = handler
 end

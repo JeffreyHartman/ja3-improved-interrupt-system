@@ -17,6 +17,7 @@ return PlaceObj('ModDef', {
 		"Code/IOS.lua",
 		"Code/UI.lua",
 		"Code/MovingTarget.lua",
+		"Code/Aim.lua",
 	},
 	'default_options', {
 		Collective = true,
@@ -27,6 +28,8 @@ return PlaceObj('ModDef', {
 		VerboseLog = false,
 		IOS = false,
 		IOSActions = "Shot only",
+		IOSAimLimit = "100%",
+		InterruptAimLimit = "100%",
 	},
 	'TagGameplay', true,
 })

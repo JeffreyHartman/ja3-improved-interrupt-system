@@ -45,6 +45,18 @@ return {
 		'StepSize', 10,
 	}),
 	PlaceObj('ModItemOptionChoice', {
+		'name', "InterruptAimLimit",
+		'DisplayName', "<color AmmoHPColor>Interrupt aim limit</color>",
+		'Help', "The part of the weapon's aim levels that a merc can use in an IIS or JA2 Classic interrupt, rounded up. It simulates a merc that has no time for a full aim. A weapon with 3 aim levels gets 1, 2, 3 or 3 levels. Under GBO 4, a weapon has up to 10 aim levels, so 25% of 10 levels gives 3. The limit never goes below the minimum aim of the shot.",
+		'DefaultValue', "100%",
+		'ChoiceList', {
+			"25%",
+			"50%",
+			"75%",
+			"100%",
+		},
+	}),
+	PlaceObj('ModItemOptionChoice', {
 		'name', "MovingTargetPenalty",
 		'DisplayName', "<color AmmoTracerColor>Moving target penalty</color>",
 		'Help', "A to-hit penalty for a merc's shot in an interrupt at the enemy whose action the interrupt paused. The penalty is the full value when the enemy moved 10 tiles or more across the line of fire in its current move, less for a shorter move or a move toward or away from the merc, and 0 when the enemy did not move. A reflex sight removes it. 0: no penalty. Under GBO 4 with aimed CTH, the penalty makes the aim cone wider, as other to-hit modifiers do.",
@@ -71,6 +83,18 @@ return {
 		'ChoiceList', {
 			"Shot only",
 			"Any action",
+		},
+	}),
+	PlaceObj('ModItemOptionChoice', {
+		'name', "IOSAimLimit",
+		'DisplayName', "<color AmmoMatchColor>IOS aim limit</color>",
+		'Help', "The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. It simulates a merc that has no time for a full aim. A weapon with 3 aim levels gets 1, 2, 3 or 3 levels. Under GBO 4, a weapon has up to 10 aim levels, so 25% of 10 levels gives 3. The limit never goes below the minimum aim of the shot.",
+		'DefaultValue', "100%",
+		'ChoiceList', {
+			"25%",
+			"50%",
+			"75%",
+			"100%",
 		},
 	}),
 	PlaceObj('ModItemOptionToggle', {
@@ -102,5 +126,9 @@ return {
 	PlaceObj('ModItemCode', {
 		'name', "MovingTarget",
 		'CodeFileName', "Code/MovingTarget.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "Aim",
+		'CodeFileName', "Code/Aim.lua",
 	}),
 }
