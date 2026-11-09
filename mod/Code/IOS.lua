@@ -14,12 +14,10 @@ function E.CombatTurn()
 	return g_Combat and g_Combat.current_turn
 end
 
--- The same cone check as vanilla Unit:IsThreatened (UnitOverwatch.lua:1664).
+-- `target` must be a unit. With the mode "overwatch", Unit:IsThreatened is also true only when
+-- `unit` can see `target`.
 function E.InOverwatchCone(unit, target)
-	local overwatch = E.Overwatch(unit)
-	if not overwatch then return false end
-	local angle = overwatch.orient or CalcOrientation(overwatch.pos, overwatch.target_pos)
-	return CheckLOS(target, unit, overwatch.dist, overwatch.stance, overwatch.cone_angle, angle) and true or false
+	return target:IsThreatened({ unit }, "overwatch") and true or false
 end
 
 -- Returns the target of the crosshair that `unit` aims with, or nil when no crosshair of `unit`
