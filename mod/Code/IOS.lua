@@ -10,11 +10,6 @@ local Log, Name, FormatAP = IIS.Log, IIS.Name, IIS.FormatAP
 -- The number of the last interrupt that IOS.InterruptRequest asked for.
 local ios_interrupt
 
-function E.Overwatch(unit)
-	local all = rawget(_G, "g_Overwatch")
-	return all and all[unit]
-end
-
 function E.CombatTurn()
 	return g_Combat and g_Combat.current_turn
 end

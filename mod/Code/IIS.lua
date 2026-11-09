@@ -204,6 +204,11 @@ function E.AttackCostRaw(unit)
 	return ok and cost or -1
 end
 
+function E.Overwatch(unit)
+	local all = rawget(_G, "g_Overwatch")
+	return all and all[unit]
+end
+
 function E.Status(unit, id)
 	return unit:HasStatusEffect(id) and true or false
 end
@@ -417,6 +422,7 @@ function IIS.WinSkipReason(w, system)
 	for _, id in ipairs(blocking_status) do
 		if E.Status(w, id) then return id end
 	end
+	if E.Overwatch(w) then return "on Overwatch" end
 	local ap = E.APRaw(w)
 	local min = R.MinAP(system, E.WalkRaw(), IIS.RulesConfig())
 	if ap < min then return "AP below minimum" end

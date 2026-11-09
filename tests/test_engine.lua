@@ -509,6 +509,18 @@ t.case("WinSkipReason: the AP minimum does not depend on the watcher's max AP", 
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 500, max_ap = 24000, attack_cost = 500 }), "IIS"), nil)
 end)
 
+t.case("WinSkipReason: a merc on Overwatch that has AP wins no IIS or JA2 Classic interrupt", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 10000 })
+	local saved = rawget(_G, "g_Overwatch")
+	g_Overwatch = { [a] = { num_attacks = 2, triggered_by = {} } }
+	local iis, classic = Q.WinSkipReason(a, "IIS"), Q.WinSkipReason(a, "JA2 Classic")
+	g_Overwatch = saved
+	t.eq(iis, "on Overwatch")
+	t.eq(classic, "on Overwatch")
+	t.eq(Q.WinSkipReason(a, "IIS"), nil)
+end)
+
 t.case("WinSkipReason: Free Move AP does not pay for the attack or the AP minimum", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 3000, free_move_ap = 29000, attack_cost = 4000, statuses = { FreeMove = true } })
