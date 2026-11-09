@@ -403,6 +403,14 @@ t.case("Options: a stored Interrupt System value wins over the old values that s
 	ApplyModOptions({})
 end)
 
+t.case("Options: the log line of the options gives IOS full aim under GBO 4", function()
+	log_lines = {}
+	ApplyModOptions({ IOSFullAim = true })
+	t.eq(LogHas("mod options applied: .* ios_full_aim=true"), true)
+	ApplyModOptions({})
+	t.eq(Q.Config.ios_full_aim, false)
+end)
+
 t.case("Options: with no stored value, the Interrupt System is IIS", function()
 	t.eq(ApplyModOptions({}).InterruptSystem, "IIS")
 	t.eq(Q.Config.system, "IIS")
