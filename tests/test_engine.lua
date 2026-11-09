@@ -55,6 +55,7 @@ const = {
 	Combat = { AwareSightRange = 24 },
 }
 CurrentModOptions = {}
+CurrentModId = "ImprovedInterruptSystem"
 
 function GameVar(name, default)
 	_G[name] = type(default) == "function" and default() or default
@@ -260,9 +261,7 @@ local function ResetWorld()
 	}
 	vanilla_result = {}
 	vanilla_provoked = {}
-	Q.Config.enabled = true
 	Q.Config.system = "IIS"
-	Q.Config.require_attack_ap = true
 	Q.Config.collective = true
 	Q.ResetTurnStats()
 	CombatActions_RunningState = {}
@@ -337,6 +336,112 @@ t.case("The OnMsg fake runs every handler for a message in the order of definiti
 end)
 
 ------------------------------------------------------------------------------------------------
+-- Mod options
+
+-- Gives the options to the mod as the game does when it loads them or when the player applies them.
+local function ApplyModOptions(options)
+	CurrentModOptions = options
+	OnMsg.ApplyModOptions(CurrentModId)
+	return options
+end
+
+t.case("Options from an older version: Enabled = off gives Interrupt System = Off", function()
+	local o = ApplyModOptions({ Enabled = false, System = "IIS" })
+	t.eq(Q.Config.system, "Off")
+	t.eq(o.InterruptSystem, "Off")
+	ApplyModOptions({})
+end)
+
+t.case("Options from an older version: Classic gives JA2 Classic, and the log names JA2 Classic", function()
+	log_lines = {}
+	local o = ApplyModOptions({ Enabled = true, System = "Classic" })
+	t.eq(Q.Config.system, "JA2 Classic")
+	t.eq(o.InterruptSystem, "JA2 Classic")
+	t.eq(LogHas("mod options applied: system=JA2 Classic "), true)
+	ApplyModOptions({})
+end)
+
+t.case("Options: a stored Interrupt System value wins over the old values that stay in the storage", function()
+	t.eq(ApplyModOptions({ InterruptSystem = "IIS", Enabled = false, System = "Classic" }).InterruptSystem, "IIS")
+	t.eq(Q.Config.system, "IIS")
+	ApplyModOptions({ InterruptSystem = "JA2 Classic", System = "IIS" })
+	t.eq(Q.Config.system, "JA2 Classic")
+	ApplyModOptions({ InterruptSystem = "Off", Enabled = true })
+	t.eq(Q.Config.system, "Off")
+	ApplyModOptions({})
+end)
+
+t.case("Options: with no stored value, the Interrupt System is IIS", function()
+	t.eq(ApplyModOptions({}).InterruptSystem, "IIS")
+	t.eq(Q.Config.system, "IIS")
+end)
+
+local function LoadModFile(path)
+	local saved = rawget(_G, "PlaceObj")
+	function PlaceObj(class, props)
+		local obj = { class = class }
+		for i = 1, #props, 2 do
+			obj[props[i]] = props[i + 1]
+		end
+		return obj
+	end
+	local result = dofile(path)
+	PlaceObj = saved
+	return result
+end
+
+local group_colors = {
+	["Interrupt System"] = "AmmoHPColor",
+	IOS = "AmmoMatchColor",
+	["both systems"] = "AmmoTracerColor",
+}
+
+t.case("The options list: no removed option, and each option has the color tag of one group", function()
+	local names = {}
+	for _, item in ipairs(LoadModFile("mod/items.lua")) do
+		if item.class:find("^ModItemOption") then
+			names[item.name] = item
+			local color = item.DisplayName:match("^<color (%w+)>.*</color>$")
+			local in_group = false
+			for _, c in pairs(group_colors) do
+				in_group = in_group or c == color
+			end
+			t.eq(in_group, true, item.name .. " color " .. tostring(color))
+		end
+	end
+	t.eq(names.Enabled, nil)
+	t.eq(names.System, nil)
+	t.eq(names.AutoEnd, nil)
+	t.eq(names.RequireAttackAP, nil)
+	t.eq(table.concat(names.InterruptSystem.ChoiceList, ","), "IIS,JA2 Classic,Off")
+	t.eq(names.InterruptSystem.DefaultValue, "IIS")
+	t.eq(names.InterruptSystem.DisplayName:match("<color (%w+)>"), group_colors["Interrupt System"])
+	t.eq(names.VerboseLog.DisplayName:match("<color (%w+)>"), group_colors["both systems"])
+end)
+
+t.case("metadata.lua gives a default for each option except InterruptSystem", function()
+	local defaults = LoadModFile("mod/metadata.lua").default_options
+	t.eq(defaults.InterruptSystem, nil)
+	local options = {}
+	for _, item in ipairs(LoadModFile("mod/items.lua")) do
+		if item.class:find("^ModItemOption") and item.name ~= "InterruptSystem" then
+			options[item.name] = true
+			t.eq(defaults[item.name], item.DefaultValue, item.name)
+		end
+	end
+	for name in pairs(defaults) do
+		t.eq(options[name], true, name)
+	end
+end)
+
+t.case("Options from an older version: Need AP for an attack = off still refuses a winner without the attack AP", function()
+	ResetWorld()
+	ApplyModOptions({ RequireAttackAP = false })
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 3000, attack_cost = 4000 }), "IIS"), "AP below attack cost")
+	ApplyModOptions({})
+end)
+
+------------------------------------------------------------------------------------------------
 -- Mover and watcher filters
 
 t.case("MoverSkipReason accepts an AI enemy's move during the AI turn", function()
@@ -357,23 +462,18 @@ t.case("MoverSkipReason refuses previews, other triggers, player units and the r
 	t.eq(Q.MoverSkipReason(mover, "move"), "reposition phase")
 	g_AIExecutionController = false
 	t.eq(Q.MoverSkipReason(mover, "move"), "no AI turn")
-	g_AIExecutionController = {}
-	Q.Config.enabled = false
-	t.eq(Q.MoverSkipReason(mover, "move"), "disabled")
 end)
 
 t.case("WinSkipReason: the AP minimum does not depend on the watcher's max AP", function()
 	ResetWorld()
-	Q.Config.require_attack_ap = false
-	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, max_ap = 6000 }), "Classic"), "AP below minimum")
-	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 500, max_ap = 24000 }), "IIS"), nil)
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, max_ap = 6000, attack_cost = 1000 }), "JA2 Classic"), "AP below minimum")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 500, max_ap = 24000, attack_cost = 500 }), "IIS"), nil)
 end)
 
 t.case("WinSkipReason: Free Move AP does not pay for the attack or the AP minimum", function()
 	ResetWorld()
 	local a = FakeUnit({ id = "a", ap = 3000, free_move_ap = 29000, attack_cost = 4000, statuses = { FreeMove = true } })
 	t.eq(Q.WinSkipReason(a, "IIS"), "AP below attack cost")
-	Q.Config.require_attack_ap = false
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "b", ap = 0, free_move_ap = 29000 }), "IIS"), "AP below minimum")
 end)
 
@@ -409,22 +509,20 @@ end)
 t.case("WinSkipReason: AP minimum, attack cost and blocking statuses", function()
 	ResetWorld()
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 10000 }), "IIS"), nil)
-	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, attack_cost = 1000 }), "Classic"), "AP below minimum")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, attack_cost = 1000 }), "JA2 Classic"), "AP below minimum")
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 3000, attack_cost = 4000 }), "IIS"), "AP below attack cost")
-	Q.Config.require_attack_ap = false
-	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 3000, attack_cost = 4000 }), "IIS"), nil)
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Panicked = true } }), "IIS"), "Panicked")
-	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Suppressed = true } }), "Classic"), "under fire")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Suppressed = true } }), "JA2 Classic"), "under fire")
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Suppressed = true } }), "IIS"), nil)
-	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Choking = true } }), "Classic"), "gassed")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Choking = true } }), "JA2 Classic"), "gassed")
 end)
 
 ------------------------------------------------------------------------------------------------
--- Classic move trigger
+-- JA2 Classic move trigger
 
-t.case("Classic: the earliest winning step wins, a loser before it does not block", function()
+t.case("JA2 Classic: the earliest winning step wins, a loser before it does not block", function()
 	ResetWorld()
-	Q.Config.system = "Classic"
+	Q.Config.system = "JA2 Classic"
 	local mover = FakeUnit({ id = "enemy", team = enemy_team, level = 1, agility = 30, pos = { x = 0, y = 0 } })
 	local a = FakeUnit({ id = "a", level = 5, agility = 85, pos = { x = 2, y = 3 } })
 	local b = FakeUnit({ id = "b", level = 3, agility = 70, pos = { x = 2, y = -3 } })
@@ -445,9 +543,9 @@ t.case("Classic: the earliest winning step wins, a loser before it does not bloc
 	t.eq(Q.turn_stats.watcher_skips["saw mover this turn"], 1)
 end)
 
-t.case("Classic: a watcher with LOS to the mover's tile is skipped", function()
+t.case("JA2 Classic: a watcher with LOS to the mover's tile is skipped", function()
 	ResetWorld()
-	Q.Config.system = "Classic"
+	Q.Config.system = "JA2 Classic"
 	local mover = FakeUnit({ id = "enemy", team = enemy_team, level = 1, agility = 30 })
 	local a = FakeUnit({ id = "a", pos = { x = 2, y = 2 } })
 	world.players = { a }
@@ -463,9 +561,9 @@ t.case("Classic: a watcher with LOS to the mover's tile is skipped", function()
 	t.eq(Q.turn_stats.watcher_skips["has LOS at the mover's tile"], 1)
 end)
 
-t.case("Classic: an unseen watcher wins even with a lower score", function()
+t.case("JA2 Classic: an unseen watcher wins even with a lower score", function()
 	ResetWorld()
-	Q.Config.system = "Classic"
+	Q.Config.system = "JA2 Classic"
 	local mover = FakeUnit({ id = "enemy", team = enemy_team, level = 9, agility = 95 })
 	local a = FakeUnit({ id = "a", level = 1, agility = 30, pos = { x = 3, y = 1 } })
 	world.players = { a }
@@ -474,6 +572,17 @@ t.case("Classic: an unseen watcher wins even with a lower score", function()
 	local idx, winners = Q.FindClassicMoveTrigger(mover, Path(mover, 3), 1)
 	t.eq(idx, 2)
 	t.eq(winners[1].how, "automatic")
+end)
+
+t.case("JA2 Classic: a watcher under fire does not duel", function()
+	ResetWorld()
+	Q.Config.system = "JA2 Classic"
+	local mover = FakeUnit({ id = "enemy", team = enemy_team, level = 1, agility = 30 })
+	local a = FakeUnit({ id = "a", level = 9, agility = 95, pos = { x = 3, y = 1 }, statuses = { Suppressed = true } })
+	world.players = { a }
+	world.los[a] = Steps(2)
+	t.eq(Q.FindClassicMoveTrigger(mover, Path(mover, 3), 1), nil)
+	t.eq(Q.turn_stats.watcher_skips["under fire"], 1)
 end)
 
 ------------------------------------------------------------------------------------------------
@@ -648,6 +757,19 @@ t.case("The check wrapper returns nothing for a stopped mover", function()
 	t.eq(list[1][1], "overwatch")
 end)
 
+t.case("Interrupt System = Off: the check wrapper adds no iis entry, and the vanilla entries stay", function()
+	local mover = IISSetup(10)
+	ApplyModOptions({ InterruptSystem = "Off" })
+	vanilla_result = { interrupts = { { "overwatch" } }, idx = 2 }
+	local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6))
+	t.eq(#list, 1)
+	t.eq(list[1][1], "overwatch")
+	t.eq(Q.turn_stats.mover_skips["interrupt system off"], 1)
+	ApplyModOptions({})
+	vanilla_result = {}
+	t.eq(Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", Path(mover, 6))[1][1], "iis")
+end)
+
 ------------------------------------------------------------------------------------------------
 -- Attack trigger
 
@@ -682,9 +804,9 @@ t.case("After an attack: the log names the skip reason, or each watcher when nob
 	t.eq(LogHas("after attack by enemy.*: no winner: a.*counter 0, reaction time %d+, sees attacker"), true)
 end)
 
-t.case("Classic after an attack: only an attacked merc that did not see the attacker duels", function()
+t.case("JA2 Classic after an attack: only an attacked merc that did not see the attacker duels", function()
 	ResetWorld()
-	Q.Config.system = "Classic"
+	Q.Config.system = "JA2 Classic"
 	local mover = FakeUnit({ id = "enemy", team = enemy_team, level = 1, agility = 30, pos = { x = 0, y = 0 } })
 	local target = FakeUnit({ id = "target", level = 6, agility = 90, pos = { x = 4, y = 0 } })
 	local seer = FakeUnit({ id = "seer", level = 6, agility = 90, pos = { x = 5, y = 0 } })

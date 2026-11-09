@@ -19,9 +19,9 @@ t.case("To113AP converts 12 vanilla AP to 100 1.13 AP and rounds half up", funct
 	t.eq(R.To113AP(0), 0)
 end)
 
-t.case("MinAP: 16 1.13 AP for Classic, 4 for IIS, and one step as the Classic floor", function()
-	t.eq(R.MinAP("Classic", 1000), 1920)
-	t.eq(R.MinAP("Classic", 3000), 3000)
+t.case("MinAP: 16 1.13 AP for JA2 Classic, 4 for IIS, and one step as the JA2 Classic floor", function()
+	t.eq(R.MinAP("JA2 Classic", 1000), 1920)
+	t.eq(R.MinAP("JA2 Classic", 3000), 3000)
 	t.eq(R.MinAP("IIS", 1000), 480)
 	t.eq(R.MinAP("IIS", 3000), 480)
 end)

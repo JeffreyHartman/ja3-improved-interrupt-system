@@ -1,6 +1,6 @@
 return PlaceObj('ModDef', {
 	'title', "Improved Interrupt System",
-	'description', "Experimental. Player-controlled interrupts with the rules of JA2 1.13. During the enemy turn, a merc can win an interrupt by the 1.13 IIS rules or by the classic duel. The enemy stops, and the mercs that won take orders until you press End Turn. Then the enemy turn continues.",
+	'description', "Experimental. Player-controlled interrupts. The Interrupt System has the two rule sets of JA2 1.13, IIS and JA2 Classic. During the enemy turn, a merc can win an interrupt. The enemy stops, and the mercs that won take orders until you press End Turn. Then the enemy turn continues. The Improved Overwatch System (IOS) pauses the enemy when the Overwatch of a merc triggers. You choose the target, the aim and the fire mode of the shot, or you do not shoot. You can turn on one system or both.",
 	'id', "ImprovedInterruptSystem",
 	'author', "jeff",
 	'version_major', 0,
@@ -17,12 +17,8 @@ return PlaceObj('ModDef', {
 		"Code/UI.lua",
 	},
 	'default_options', {
-		Enabled = true,
-		System = "IIS",
 		Collective = true,
 		AfterInterrupt = "Stop",
-		AutoEnd = true,
-		RequireAttackAP = true,
 		ReactionTime = 25,
 		BasicPercent = 60,
 		VerboseLog = false,

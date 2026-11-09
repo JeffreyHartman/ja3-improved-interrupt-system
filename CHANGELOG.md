@@ -8,6 +8,11 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 
 ### Changed
 
+- The "Interrupt System (Experimental)" option has the values IIS, JA2 Classic and Off. It replaces the "JA2 1.13 interrupts (Experimental)" and "Interrupt system" options. "Classic" is now "JA2 Classic". Old settings become the new settings (#28).
+- The "End interrupt at 0 AP" and "Need AP for an attack" options are removed. Their rules are always on (#28).
+- Each option has the color of its group in the options list (#28).
+- The mod description names IIS, JA2 Classic and IOS (#28).
+
 - The code that runs an interrupt is in a new module, `IISControl`. Each entry type of the provoke list has a handler, and the 1.13 checks are the first handler. This prepares Improved Overwatch (#17). The game does not change (#19, #26).
 - The "Interrupted enemy" option is read when the interrupt begins. A change to the option during an interrupt has an effect only on the next interrupt.
 
