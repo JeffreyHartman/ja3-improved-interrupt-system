@@ -7,6 +7,9 @@ IOS = IOS or {}
 local E = IIS.E
 local Log, Name, FormatAP = IIS.Log, IIS.Name, IIS.FormatAP
 
+-- The number of the last interrupt that IOS.InterruptRequest asked for.
+local ios_interrupt
+
 function E.Overwatch(unit)
 	local all = rawget(_G, "g_Overwatch")
 	return all and all[unit]
@@ -103,6 +106,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 	mover:RemoveStatusEffect("Hidden")
 	E.LogOverwatchReveal(mover)
 
+	ios_interrupt = n
 	return {
 		interrupters = overwatchers,
 		dummy = entry[4],
@@ -117,6 +121,25 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 			end
 		end,
 	}
+end
+
+--- Returns true when `unit` is an overwatcher in the active interrupt, and that interrupt is an IOS
+-- interrupt.
+function IOS.IsOverwatcher(unit)
+	local it = IISControl.Active()
+	return it and it:Number() == ios_interrupt and it:IsInterrupter(unit) or false
+end
+
+-- The crosshair's to-hit preview and Unit:FirearmAttack both get their attack args from here. The
+-- vanilla Overwatch shot is always a firearm attack, so other attacks stay as they are.
+local orig_PrepareAttackArgs = Unit.PrepareAttackArgs
+function Unit:PrepareAttackArgs(action_id, args)
+	local attack_args = orig_PrepareAttackArgs(self, action_id, args)
+	if IsKindOf(attack_args.weapon, "Firearm") and IOS.IsOverwatcher(self) then
+		attack_args.opportunity_attack = true
+		attack_args.opportunity_attack_type = "Overwatch"
+	end
+	return attack_args
 end
 
 --- Registers the handler for "overwatch" entries when the IOS option is on, and removes it when
