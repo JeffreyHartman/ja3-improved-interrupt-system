@@ -26,6 +26,7 @@ IIS.Config = {
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
 	ios = false,                 -- IOS: the Overwatch trigger of a merc starts an interrupt (IOS.lua)
+	ios_actions = "shot",        -- "shot": an overwatcher can only shoot in its cone or reload; "any": any action (IOS.lua)
 }
 
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
@@ -55,6 +56,7 @@ local function ApplyOptions()
 	cfg.moving_target_penalty = tonumber(o.MovingTargetPenalty) or 0
 	cfg.log_checks = o.VerboseLog == true
 	cfg.ios = o.IOS == true
+	cfg.ios_actions = o.IOSActions == "Any action" and "any" or "shot"
 end
 ApplyOptions()
 
@@ -1023,10 +1025,10 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s",
+	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s",
 		why, c.system, tostring(c.collective), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
 		tostring(c.moving_target_penalty),
-		tostring(c.log_checks), tostring(c.ios))
+		tostring(c.log_checks), tostring(c.ios), c.ios_actions)
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks
