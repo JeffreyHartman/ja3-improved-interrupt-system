@@ -15,6 +15,7 @@ return PlaceObj('ModDef', {
 		"Code/IIS.lua",
 		"Code/Control.lua",
 		"Code/UI.lua",
+		"Code/MovingTarget.lua",
 	},
 	'default_options', {
 		Enabled = true,
@@ -25,6 +26,7 @@ return PlaceObj('ModDef', {
 		RequireAttackAP = true,
 		ReactionTime = 25,
 		BasicPercent = 60,
+		MovingTargetPenalty = "0",
 		VerboseLog = false,
 	},
 	'TagGameplay', true,

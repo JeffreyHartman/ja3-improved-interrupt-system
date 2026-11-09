@@ -23,6 +23,7 @@ IIS.Config = {
 	require_attack_ap = true,    -- a winner needs AP for its default attack (TeamTurns.cpp:877)
 	reaction_time = 25,          -- BASIC_REACTION_TIME_LENGTH
 	basic_pct = 60,              -- BASIC_PERCENTAGE_APS_REGISTERED
+	moving_target_penalty = 0,   -- maximum penalty of the Moving target to-hit modifier (MovingTarget.lua)
 	log_checks = false,          -- also log each watcher of each check
 	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
@@ -41,6 +42,7 @@ local function ApplyOptions()
 	cfg.require_attack_ap = o.RequireAttackAP ~= false
 	cfg.reaction_time = tonumber(o.ReactionTime) or 25
 	cfg.basic_pct = tonumber(o.BasicPercent) or 60
+	cfg.moving_target_penalty = tonumber(o.MovingTargetPenalty) or 0
 	cfg.log_checks = o.VerboseLog == true
 end
 ApplyOptions()
@@ -1011,9 +1013,10 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: enabled=%s system=%s collective=%s after_interrupt=%s auto_end=%s require_attack_ap=%s reaction_time=%s basic_pct=%s verbose=%s",
+	Log("%s: enabled=%s system=%s collective=%s after_interrupt=%s auto_end=%s require_attack_ap=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s",
 		why, tostring(c.enabled), c.system, tostring(c.collective), c.after_interrupt, tostring(c.auto_end),
-		tostring(c.require_attack_ap), tostring(c.reaction_time), tostring(c.basic_pct), tostring(c.log_checks))
+		tostring(c.require_attack_ap), tostring(c.reaction_time), tostring(c.basic_pct), tostring(c.moving_target_penalty),
+		tostring(c.log_checks))
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks

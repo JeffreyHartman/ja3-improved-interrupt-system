@@ -6,6 +6,10 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 
 ## 0.7.4 (build 11), not released
 
+### Added
+
+- A "Moving target penalty" option. It gives a to-hit penalty for a merc's shot in an interrupt at the enemy that the interrupt paused, by the design of the vanilla Evasive Movement modifier. The default 0 gives no penalty (#35).
+
 ### Changed
 
 - The code that runs an interrupt is in a new module, `IISControl`. Each entry type of the provoke list has a handler, and the 1.13 checks are the first handler. This prepares Improved Overwatch (#17). The game does not change (#19, #26).
