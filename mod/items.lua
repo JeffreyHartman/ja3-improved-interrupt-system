@@ -63,6 +63,16 @@ return {
 		'Help', "On: when an enemy moves or attacks in the Overwatch cone of a merc, the enemy stops and the merc acts in an interrupt in place of the automatic Overwatch shot. The merc pays from the AP of its Overwatch attacks, and the AP that it does not spend stays for the next trigger. End Turn with no action costs nothing. The enemy then continues its action. Enemy Overwatch does not change. Under GBO 4, the pool uses the GBO 4 attack costs and Overwatch attack count.",
 		'DefaultValue', false,
 	}),
+	PlaceObj('ModItemOptionChoice', {
+		'name', "IOSActions",
+		'DisplayName', "<color AmmoMatchColor>IOS actions</color>",
+		'Help', "What a merc can do in an IOS interrupt. Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action that its pool pays for. After the interrupt, Overwatch ends when the merc moved, changed stance or did an action that is not an attack or a reload, and the rest of the pool is lost. Otherwise Overwatch stays while the pool pays for one attack. Under GBO 4, an action that removes the Shooting Stance also ends Overwatch.",
+		'DefaultValue', "Shot only",
+		'ChoiceList', {
+			"Shot only",
+			"Any action",
+		},
+	}),
 	PlaceObj('ModItemOptionToggle', {
 		'name', "VerboseLog",
 		'DisplayName', "<color AmmoTracerColor>Verbose log</color>",

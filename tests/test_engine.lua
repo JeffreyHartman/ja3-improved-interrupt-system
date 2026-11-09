@@ -117,7 +117,11 @@ function IsSetpiecePlaying() return false end
 
 CombatActions_RunningState = {}
 CombatActions_Waiting = {}
-CombatActions = { Move = { SimultaneousPlay = true }, Attack = {}, Reload = {} }
+CombatActions = {
+	Move = { SimultaneousPlay = true, group = "Default" },
+	Attack = { ActionType = "Ranged Attack", group = "FiringModeMetaAction" },
+	Reload = { group = "Hidden" },
+}
 
 function HasCombatActionInProgress(unit)
 	return CombatActions_RunningState[unit] and true or false
@@ -261,7 +265,7 @@ local function EndActive()
 end
 
 local function ResetWorld()
-	world = { players = {}, los = {}, sees = {}, mover_sees = {}, rand = 99 }
+	world = { players = {}, los = {}, sees = {}, mover_sees = {}, cone = {}, rand = 99 }
 	Q.attack_targets = {}
 	EndActive()
 	gv_IIS = {}
@@ -429,6 +433,16 @@ t.case("The options list: no removed option, and each option has the color tag o
 	t.eq(names.InterruptSystem.DefaultValue, "IIS")
 	t.eq(names.InterruptSystem.DisplayName:match("<color (%w+)>"), group_colors["Interrupt System"])
 	t.eq(names.VerboseLog.DisplayName:match("<color (%w+)>"), group_colors["both systems"])
+	t.eq(table.concat(names.IOSActions.ChoiceList, ","), "Shot only,Any action")
+	t.eq(names.IOSActions.DefaultValue, "Shot only")
+	t.eq(names.IOSActions.DisplayName:match("<color (%w+)>"), group_colors.IOS)
+	t.eq(names.IOSActions.Help:find("GBO 4") ~= nil, true)
+end)
+
+t.case("Options: IOS actions gives the action limit of an overwatcher, and Shot only is the default", function()
+	t.eq(ApplyModOptions({ IOSActions = "Any action" }) and Q.Config.ios_actions, "any")
+	t.eq(ApplyModOptions({ IOSActions = "Shot only" }) and Q.Config.ios_actions, "shot")
+	t.eq(ApplyModOptions({}) and Q.Config.ios_actions, "shot")
 end)
 
 t.case("metadata.lua gives a default for each option except InterruptSystem", function()
@@ -1660,8 +1674,18 @@ g_Overwatch = {}
 local reveal_logs = {}
 E.LogOverwatchReveal = function(mover) reveal_logs[#reveal_logs + 1] = mover end
 
-local function SetIOS(on)
-	ApplyModOptions({ IOS = on })
+E.InOverwatchCone = function(u, target) return world.cone[u] and world.cone[u][target] or false end
+
+local function SetIOS(on, actions)
+	ApplyModOptions({ IOS = on, IOSActions = actions })
+end
+
+-- Sets what `ow` sees and has in its Overwatch cone. A nil value keeps the current one.
+local function Watch(ow, target, sees, in_cone)
+	world.sees[ow] = world.sees[ow] or {}
+	world.cone[ow] = world.cone[ow] or {}
+	if sees ~= nil then world.sees[ow][target] = sees end
+	if in_cone ~= nil then world.cone[ow][target] = in_cone end
 end
 
 -- A merc on Overwatch with 0 AP and `attacks` Overwatch attacks. Its default attack costs `cost`
@@ -1680,7 +1704,13 @@ local function Overwatcher(o)
 end
 
 -- Gives the WalkingMover's provoke list an "overwatch" entry of `ow` on step 4, and returns the list.
+-- Unless a test says otherwise, `ow` sees the mover and has it in its cone, as vanilla requires for
+-- a trigger.
 local function OverwatchTrigger(mover, ow, dummies, script)
+	for _, rows in ipairs{ world.sees, world.cone } do
+		rows[ow] = rows[ow] or {}
+		if rows[ow][mover] == nil then rows[ow][mover] = true end
+	end
 	FakeControl(script)
 	local list = { { "overwatch", ow, { target = mover }, dummies[4] } }
 	Unit.ProvokeOpportunityAttacksFromList(mover, list)
@@ -1862,6 +1892,102 @@ t.case("IOS: the AP of a queued action that never started goes back to the pool"
 	t.eq(LogHas("dropped queued action Attack of ow#ow, refunded 4000 raw AP"), true)
 	t.eq(g_Overwatch[ow].num_attacks, 2)
 	t.eq(ow.ActionPoints, 0)
+end)
+
+t.case("IOS Shot only: the overwatcher cannot start a move", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 4000 }
+	SetIOS(true, "Shot only")
+	local left
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			StartCombatAction("Move", ow, 1000, { goto_pos = { x = 9, y = 9 } })
+			left = ow.ActionPoints
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(#ran_actions, 0)
+	t.eq(left, 8000)
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+end)
+
+t.case("IOS Shot only: the overwatcher cannot attack an enemy outside its cone or an enemy that it cannot see", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 4000 }
+	local outside = FakeUnit({ id = "outside", team = enemy_team })
+	SetIOS(true, "Shot only")
+	Watch(ow, mover, false, true)
+	Watch(ow, outside, true, false)
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = Shoot(ow, mover, 4000) },
+		{ at = 150, run = Shoot(ow, outside, 4000) },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(#ran_actions, 0)
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+end)
+
+t.case("IOS Shot only: the overwatcher can attack an enemy in its cone, and Overwatch stays", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 4000 }
+	local other = FakeUnit({ id = "other", team = enemy_team })
+	SetIOS(true, "Shot only")
+	Watch(ow, other, true, true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, other, 4000) }, { at = 300, run = PressEndTurn } })
+	t.eq(#ran_actions, 1)
+	t.eq(ran_actions[1][1], "Attack")
+	t.eq(g_Overwatch[ow] ~= nil, true)
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+end)
+
+t.case("IOS Shot only: a reload is allowed, and Overwatch stays", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 4000 }
+	SetIOS(true, "Shot only")
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() StartCombatAction("Reload", ow, 2000, {}) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(#ran_actions, 1)
+	t.eq(ran_actions[1][1], "Reload")
+	t.eq(g_Overwatch[ow] ~= nil, true)
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+end)
+
+t.case("IOS Any action: a move ends Overwatch after the interrupt", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 4000 }
+	SetIOS(true, "Any action")
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			StartCombatAction("Move", ow, 1000, { goto_pos = { x = 9, y = 9 } })
+			during = g_Overwatch[ow] ~= nil
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(#ran_actions, 1)
+	t.eq(ran_actions[1][1], "Move")
+	t.eq(during, true)
+	t.eq(g_Overwatch[ow], nil)
+	t.eq(ow.ActionPoints, 0)
+end)
+
+t.case("IOS Any action: an attack keeps Overwatch while the pool can pay for one attack", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 4000 }
+	local outside = FakeUnit({ id = "outside", team = enemy_team })
+	SetIOS(true, "Any action")
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = Shoot(ow, mover, 4000) },
+		{ at = 150, run = Shoot(ow, outside, 4000) },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(#ran_actions, 2)
+	t.eq(g_Overwatch[ow] ~= nil, true)
+	t.eq(g_Overwatch[ow].num_attacks, 1)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 4000) }, { at = 300, run = PressEndTurn } })
+	t.eq(g_Overwatch[ow], nil)
 end)
 
 t.case("IOS: an error in the handler is logged, and the enemy action continues with the vanilla shot", function()

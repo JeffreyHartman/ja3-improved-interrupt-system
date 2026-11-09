@@ -16,8 +16,48 @@ function E.CombatTurn()
 	return g_Combat and g_Combat.current_turn
 end
 
+-- The same cone check as vanilla Unit:IsThreatened (UnitOverwatch.lua:1664).
+function E.InOverwatchCone(unit, target)
+	local overwatch = E.Overwatch(unit)
+	if not overwatch then return false end
+	local angle = overwatch.orient or CalcOrientation(overwatch.pos, overwatch.target_pos)
+	return CheckLOS(target, unit, overwatch.dist, overwatch.stance, overwatch.cone_angle, angle) and true or false
+end
+
 function E.LogOverwatchReveal(mover)
 	CombatLog("short", T{353305209140, "<LogName> was revealed by enemy overwatch", mover})
+end
+
+local attack_groups = { WeaponAttacks = true, FiringModeMetaAction = true }
+local attack_types = { ["Ranged Attack"] = true, ["Melee Attack"] = true }
+-- These attacks move the attacker away from its Overwatch position.
+local moving_attacks = { MobileShot = true, RunAndGun = true, Charge = true, HyenaCharge = true }
+
+local function IsAttack(action_id)
+	local action = CombatActions[action_id]
+	return action and not moving_attacks[action_id] and attack_groups[action.group] and attack_types[action.ActionType]
+		and true or false
+end
+
+local function InSightInCone(m, target)
+	return IsKindOf(target, "Unit") and not target:IsDead() and m:IsOnEnemySide(target) and E.SeesNow(m, target)
+		and E.InOverwatchCone(m, target)
+end
+
+-- Returns the action limit of overwatcher `m` for the "IOS actions" option. With "Any action", it
+-- writes the first action that is not an attack or a reload to `ends[m]`.
+local function ActionLimit(m, ends)
+	if IIS.Config.ios_actions == "any" then
+		return function(action_id)
+			if action_id ~= "Reload" and not IsAttack(action_id) then
+				ends[m] = ends[m] or action_id
+			end
+			return true
+		end
+	end
+	return function(action_id, target)
+		return action_id == "Reload" or IsAttack(action_id) and InSightInCone(m, target)
+	end
 end
 
 --- Returns the raw AP pool of an Overwatch state.
@@ -42,12 +82,19 @@ function IOS.StorePool(overwatch, pool, cost, turn)
 end
 
 -- Sets the attack count and the pool of `m` from the AP that it has left, and ends its Overwatch
--- when the pool cannot pay for one attack. A permanent Overwatch (a set-up machine gun) stays at 0
--- attacks, as in vanilla, until the game counts its attacks again.
-local function FinishOverwatcher(m, left, n)
+-- when the pool cannot pay for one attack or when `m` started `ended_by`, an action that is not an
+-- attack or a reload. A permanent Overwatch (a set-up machine gun) stays at 0 attacks, as in
+-- vanilla, until the game counts its attacks again.
+local function FinishOverwatcher(m, left, n, ended_by)
 	local overwatch = E.Overwatch(m)
 	if not overwatch then
 		Log("INT #%d overwatcher %s is no longer on Overwatch, pool %s lost", n, Name(m), FormatAP(left))
+		return
+	end
+	if ended_by then
+		Log("INT #%d overwatcher %s started %s, Overwatch ends, pool %s lost", n, Name(m), tostring(ended_by),
+			FormatAP(left))
+		m:InterruptPreparedAttack()
 		return
 	end
 	local cost = E.AttackCostRaw(m)
@@ -78,7 +125,7 @@ end
 -- `triggered_by`, the mover loses Hidden, and the combat log names the mover.
 function IOS.InterruptRequest(mover, entry, n, entries)
 	local turn = E.CombatTurn()
-	local overwatchers, grants, notes = {}, {}, {}
+	local overwatchers, grants, notes, limits, ends = {}, {}, {}, {}, {}
 	for _, e in ipairs(entries or { entry }) do
 		local m = e[2]
 		local overwatch = E.CanControlTeam(m) and E.Overwatch(m)
@@ -88,6 +135,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 			if cost > 0 and pool >= cost then
 				overwatchers[#overwatchers + 1] = m
 				grants[m] = pool
+				limits[m] = ActionLimit(m, ends)
 				notes[m] = string.format(" (overwatcher, pool %s, attack cost %s)", FormatAP(pool), FormatAP(cost))
 			else
 				Log("IOS: overwatcher %s cannot pay for an attack (pool %s, cost %s), vanilla handles it", Name(m),
@@ -111,9 +159,10 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 		notes = notes,
 		banner = "Overwatch",
 		ap_grants = grants,
+		action_limits = limits,
 		on_end = function(ap_left)
 			for _, m in ipairs(overwatchers) do
-				IIS.SafeCall(nil, "IOS end of " .. Name(m), FinishOverwatcher, m, ap_left[m] or 0, n)
+				IIS.SafeCall(nil, "IOS end of " .. Name(m), FinishOverwatcher, m, ap_left[m] or 0, n, ends[m])
 			end
 		end,
 	}
