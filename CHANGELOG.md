@@ -10,6 +10,7 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 
 - The "Improved Overwatch System (IOS)" option, off by default. When the Overwatch trigger of a merc happens, the merc acts in an interrupt in place of the vanilla Overwatch shot. Its AP in the interrupt is its Overwatch attacks multiplied by the cost of its default attack. The AP that it does not spend stays for the next trigger, and a pass costs nothing. The enemy always continues its action (#29).
 - The "IOS actions" option. With "Shot only", the default, an overwatcher can only shoot at an enemy in its Overwatch cone that it can see, or reload. With "Any action", it can do any action that its pool pays for. A move, a stance change or an action that is not an attack or a reload ends Overwatch after the interrupt (#31).
+- The shot of a merc in an IOS interrupt is an Overwatch attack for the game rules, in the to-hit preview and in the attack. The Overwatch to-hit modifier, the vanilla crit rule and the Overwatch perks apply to it (#32).
 - A "Moving target penalty" option. It gives a to-hit penalty for a merc's shot in an interrupt at the enemy that the interrupt paused, by the design of the vanilla Evasive Movement modifier. The default 0 gives no penalty (#35).
 
 ### Changed
