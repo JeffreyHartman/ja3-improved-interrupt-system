@@ -471,6 +471,18 @@ t.case("The options list: the help text of each option says what changes under G
 	end
 end)
 
+t.case("The README options table has a row for each option", function()
+	local file = io.open("README.md")
+	local readme = file:read("a")
+	file:close()
+	for _, item in ipairs(LoadModFile("mod/items.lua")) do
+		if item.class:find("^ModItemOption") then
+			local name = item.DisplayName:match("^<color %w+>(.*)</color>$")
+			t.eq(readme:find("\n| " .. name .. " |", 1, true) ~= nil, true, name)
+		end
+	end
+end)
+
 t.case("Options: IOS actions gives the action limit of an overwatcher, and Shot only is the default", function()
 	t.eq(ApplyModOptions({ IOSActions = "Any action" }) and Q.Config.ios_actions, "any")
 	t.eq(ApplyModOptions({ IOSActions = "Shot only" }) and Q.Config.ios_actions, "shot")

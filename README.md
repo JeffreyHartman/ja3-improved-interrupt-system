@@ -47,7 +47,11 @@ The options list shows each group of options in one color: one color for the Int
 | IIS AP registered (%) | Interrupt System | 60 | Higher values give more interrupts. |
 | Interrupt aim limit | Interrupt System | 100% | The part of the weapon's aim levels that a merc can use in an IIS or JA2 Classic interrupt, rounded up. |
 | Improved Overwatch System (IOS) | IOS | off | The Overwatch trigger of a merc starts an interrupt in place of the Overwatch shot. |
+| IOS actions | IOS | Shot only | Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action. A move, a stance change or another action that is not an attack or a reload ends Overwatch. |
 | IOS aim limit | IOS | 100% | The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. |
+| IOS free aim levels | IOS | 1 | The minimum aim level of a merc's shot in an IOS interrupt. These levels cost no AP. Killzone gives at least 1. |
+| IOS full aim under GBO 4 | IOS | off | Under GBO 4 in old CTH mode, an IOS shot gets the full aim bonus in place of half. |
+| Moving target penalty | Both systems | 0 | A to-hit penalty for a shot in an interrupt at an enemy that moved across the line of fire. |
 | Verbose log | Both systems | off | Writes more detail to the game log. |
 
 A setting from version 0.7.3 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".
