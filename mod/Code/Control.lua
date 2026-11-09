@@ -40,9 +40,9 @@ function IISControl.Setup(o)
 end
 
 -- The engine state that the last interrupt took and EndInterrupt gives back, the counters for its
--- END log line, and the handler's request. IISControl.Activate replaces them at the start of each
--- interrupt.
-local taken, counters, request
+-- END log line, the handler's request, and the IDs of the actions that each interrupter started.
+-- IISControl.Activate replaces them at the start of each interrupt.
+local taken, counters, request, started
 
 --- Returns the handler's request of the active interrupt, or nil when no interrupt is active.
 function IISControl.Request()
@@ -57,6 +57,7 @@ function IISControl.Activate(it, dummy, req)
 	taken = { dummy = dummy, ap_before = {} }
 	counters = { start_time = GameTime(), start_ap = {}, forced = {} }
 	request = req or empty_table
+	started = {}
 	for _, m in ipairs(it:Interrupters()) do
 		counters.start_ap[m] = E.APRaw(m)
 	end
@@ -342,8 +343,9 @@ IISControl.HANDLED = "iis_handled"
 --   `banner`: optional, the banner shows "<banner>: <interrupter names>" in place of "INTERRUPT!"
 --   `ap_grants`: an optional raw AP for each interrupter. The interrupter's AP is the grant during
 --     the interrupt, and its old AP again after it.
---   `on_end(ap_left)`: optional, called at the end with the raw AP that each granted interrupter
---     had left
+--   `on_end(ap_left, started)`: optional, called at the end with the raw AP that each granted
+--     interrupter had left, and the list of the action IDs that each interrupter started, in
+--     order. A queued action that never started is not in the list.
 --   `action_limits`: an optional `limit(action_id, target)` for each interrupter. The interrupter
 --     can start an action only when its limit returns true.
 --   `aim_limit`: optional, the percent of its maximum aim level that each interrupter can use
@@ -576,7 +578,7 @@ function IISControl.EndInterrupt(it, reason)
 		end
 	end
 	if request.on_end then
-		SafeCall(it, "on_end", request.on_end, ap_left)
+		SafeCall(it, "on_end", request.on_end, ap_left, started)
 	end
 end
 
@@ -647,6 +649,8 @@ function IIS.RunMercAction(it, action_id, unit, ap, ...)
 	local count = it:ActionStarted()
 	Log("INT #%d run action #%d %s merc=%s cost=%s ap_left=%s | %s", it:Number(), count, tostring(action_id), Name(unit),
 		IIS.FormatAP(ap), AP(unit), RunningStateSnapshot())
+	started[unit] = started[unit] or {}
+	table.insert(started[unit], action_id)
 	g_Combat:SetActiveUnit(unit)
 	RunCombatAction(action_id, unit, ap, ...)
 end

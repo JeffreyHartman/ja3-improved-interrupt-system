@@ -42,19 +42,22 @@ local function InSightInCone(m, target)
 		and E.InOverwatchCone(m, target)
 end
 
--- Returns the action limit of overwatcher `m` for the "IOS actions" option. With "Any action", it
--- writes the first action that is not an attack or a reload to `ends[m]`.
-local function ActionLimit(m, ends)
+-- Returns the action limit of overwatcher `m` for the "IOS actions" option.
+local function ActionLimit(m)
 	if IIS.Config.ios_actions == "any" then
-		return function(action_id)
-			if action_id ~= "Reload" and not IsAttack(action_id) then
-				ends[m] = ends[m] or action_id
-			end
-			return true
-		end
+		return function() return true end
 	end
 	return function(action_id, target)
 		return action_id == "Reload" or IsAttack(action_id) and InSightInCone(m, target)
+	end
+end
+
+-- Returns the first action ID in `action_ids` that is not an attack or a reload, or nil.
+local function OverwatchEndingAction(action_ids)
+	for _, action_id in ipairs(action_ids or empty_table) do
+		if action_id ~= "Reload" and not IsAttack(action_id) then
+			return action_id
+		end
 	end
 end
 
@@ -142,7 +145,7 @@ end
 -- `triggered_by`, the mover loses Hidden, and the combat log names the mover.
 function IOS.InterruptRequest(mover, entry, n, entries)
 	local turn = E.CombatTurn()
-	local overwatchers, grants, notes, limits, ends = {}, {}, {}, {}, {}
+	local overwatchers, grants, notes, limits = {}, {}, {}, {}
 	for _, e in ipairs(entries or { entry }) do
 		local m = e[2]
 		local overwatch = E.CanControlTeam(m) and E.Overwatch(m)
@@ -152,7 +155,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 			if cost > 0 and pool >= cost then
 				overwatchers[#overwatchers + 1] = m
 				grants[m] = pool
-				limits[m] = ActionLimit(m, ends)
+				limits[m] = ActionLimit(m)
 				notes[m] = string.format(" (overwatcher, pool %s, attack cost %s)", FormatAP(pool), FormatAP(cost))
 			else
 				Log("IOS: overwatcher %s cannot pay for an attack (pool %s, cost %s), vanilla handles it", Name(m),
@@ -183,9 +186,10 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 		end,
 		ap_grants = grants,
 		action_limits = limits,
-		on_end = function(ap_left)
+		on_end = function(ap_left, started)
 			for _, m in ipairs(overwatchers) do
-				IIS.SafeCall(nil, "IOS end of " .. Name(m), FinishOverwatcher, m, ap_left[m] or 0, n, ends[m])
+				IIS.SafeCall(nil, "IOS end of " .. Name(m), FinishOverwatcher, m, ap_left[m] or 0, n,
+					OverwatchEndingAction(started[m]))
 			end
 		end,
 	}

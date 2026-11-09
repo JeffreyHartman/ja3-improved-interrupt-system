@@ -2002,6 +2002,39 @@ t.case("IOS Any action: a move ends Overwatch after the interrupt", function()
 	t.eq(ow.ActionPoints, 0)
 end)
 
+t.case("IOS Any action: a queued move that never started does not end Overwatch", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 4000 }
+	SetIOS(true, "Any action")
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			CombatActions_RunningState[ow] = "start"
+			StartCombatAction("Move", ow, 1000, { goto_pos = { x = 9, y = 9 } })
+		end },
+		{ at = 200, run = function() CombatActions_RunningState[ow] = nil end },
+		{ at = 300, run = PressEndTurn },
+		{ at = 400, run = PressEndTurn },
+	})
+	t.eq(LogHas("dropped queued action Move of ow#ow"), true)
+	t.eq(#ran_actions, 0)
+	t.eq(g_Overwatch[ow] ~= nil, true)
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+end)
+
+t.case("IOS Any action: a stance change ends Overwatch after the interrupt", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 4000 }
+	SetIOS(true, "Any action")
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() StartCombatAction("StanceCrouch", ow, 1000, {}) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(#ran_actions, 1)
+	t.eq(ran_actions[1][1], "StanceCrouch")
+	t.eq(g_Overwatch[ow], nil)
+	t.eq(LogHas("overwatcher ow#ow started StanceCrouch, Overwatch ends"), true)
+end)
+
 t.case("IOS Any action: an attack keeps Overwatch while the pool can pay for one attack", function()
 	local mover, _, dummies = WalkingMover(10)
 	local ow = Overwatcher{ attacks = 3, cost = 4000 }
