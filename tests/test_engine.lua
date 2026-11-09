@@ -2011,3 +2011,128 @@ t.case("IOS: an error in the handler is logged, and the enemy action continues w
 	t.eq(#vanilla_attacks, 1)
 	SetIOS(false)
 end)
+
+-- Gives the WalkingMover's provoke list an "overwatch" entry on step 4 for each overwatcher in
+-- `ows`, then `extra` entries, and returns the list.
+local function OverwatchTriggers(mover, ows, dummies, script, extra)
+	FakeControl(script)
+	local list = {}
+	for _, ow in ipairs(ows) do
+		list[#list + 1] = { "overwatch", ow, { target = mover }, dummies[4] }
+	end
+	for _, e in ipairs(extra or {}) do
+		list[#list + 1] = e
+	end
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	game_time = 0
+	return list
+end
+
+t.case("IOS: two overwatchers on one step share one IOS interrupt, and each has its own pool", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow1 = Overwatcher{ id = "ow1", attacks = 2, cost = 4000 }
+	local ow2 = Overwatcher{ id = "ow2", attacks = 3, cost = 2500 }
+	SetIOS(true)
+	local n = IISControl.InterruptCount() + 1
+	local during = {}
+	local list = OverwatchTriggers(mover, { ow1, ow2 }, dummies, {
+		{ at = 100, run = function() during[ow1], during[ow2] = ow1.ActionPoints, ow2.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	SetIOS(false)
+	t.eq(IISControl.InterruptCount(), n)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: ow1#ow1"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 2: ow2#ow2"), true)
+	t.eq(during[ow1], 8000)
+	t.eq(during[ow2], 7500)
+	t.eq(list[1][1], IISControl.HANDLED)
+	t.eq(list[2][1], IISControl.HANDLED)
+	t.eq(#vanilla_attacks, 0)
+end)
+
+-- An "iis" entry on step 4 with `a` as the IIS winner of a move trigger.
+local function IISEntry(a, dummies)
+	return { "iis", a, { mercs = { a }, system = "IIS", kind = "move", check = 1 }, dummies[4] }
+end
+
+t.case("IOS: an overwatcher and an IIS winner on one step give an IOS interrupt, then an IIS interrupt", function()
+	local mover, a, dummies = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOS(true)
+	local n = IISControl.InterruptCount() + 1
+	local actors = {}
+	local list = OverwatchTriggers(mover, { ow }, dummies, {
+		{ at = 100, run = function() actors[#actors + 1] = IISControl.Active():Interrupters() end },
+		{ at = 300, run = PressEndTurn },
+		{ at = 500, run = function() actors[#actors + 1] = IISControl.Active():Interrupters() end },
+		{ at = 700, run = PressEndTurn },
+	}, { IISEntry(a, dummies) })
+	SetIOS(false)
+	t.eq(IISControl.InterruptCount(), n + 1)
+	t.eq(LogHas("INT #" .. n .. " BEGIN IOS overwatch"), true)
+	t.eq(LogHas("INT #" .. n + 1 .. " BEGIN IIS move"), true)
+	t.eq(#actors, 2)
+	t.eq(actors[1][1], ow)
+	t.eq(#actors[1], 1)
+	t.eq(actors[2][1], a)
+	t.eq(#actors[2], 1)
+	t.eq(list[1][1], IISControl.HANDLED)
+	t.eq(list[2][1], IISControl.HANDLED)
+end)
+
+t.case("IOS: when the mover dies in the IOS interrupt, no IIS interrupt starts", function()
+	local mover, a, dummies = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOS(true)
+	local n = IISControl.InterruptCount() + 1
+	OverwatchTriggers(mover, { ow }, dummies, {
+		{ at = 100, run = function() mover.dead = true end },
+		{ at = 300, run = PressEndTurn },
+		{ at = 700, run = PressEndTurn },
+	}, { IISEntry(a, dummies) })
+	SetIOS(false)
+	t.eq(IISControl.InterruptCount(), n)
+	t.eq(LogHas("BEGIN IIS"), false)
+	t.eq(IISControl.Active(), false)
+end)
+
+t.case("IOS: when the mover is downed in the IOS interrupt, no IIS interrupt starts", function()
+	local mover, a, dummies = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOS(true)
+	local n = IISControl.InterruptCount() + 1
+	OverwatchTriggers(mover, { ow }, dummies, {
+		{ at = 100, run = function() mover.down = true end },
+		{ at = 300, run = PressEndTurn },
+		{ at = 700, run = PressEndTurn },
+	}, { IISEntry(a, dummies) })
+	SetIOS(false)
+	t.eq(IISControl.InterruptCount(), n)
+	t.eq(LogHas("BEGIN IIS"), false)
+	t.eq(LogHas("interrupt skipped: mover enemy#enemy cannot act"), true)
+end)
+
+t.case("IOS: an overwatcher that does not shoot because another overwatcher killed the mover keeps its full pool", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow1 = Overwatcher{ id = "ow1", attacks = 2, cost = 4000 }
+	local ow2 = Overwatcher{ id = "ow2", attacks = 3, cost = 2500 }
+	SetIOS(true)
+	OverwatchTriggers(mover, { ow1, ow2 }, dummies, {
+		{ at = 100, run = function()
+			Shoot(ow1, mover, 4000)()
+			mover.dead = true
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(LogHas("END %(mover_dead%)"), true)
+	t.eq(g_Overwatch[ow1].num_attacks, 1)
+	t.eq(g_Overwatch[ow2].num_attacks, 3)
+	local next_mover, _, next_dummies = WalkingMover(10)
+	local during
+	OverwatchTriggers(next_mover, { ow2 }, next_dummies, {
+		{ at = 100, run = function() during = ow2.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	SetIOS(false)
+	t.eq(during, 7500)
+end)

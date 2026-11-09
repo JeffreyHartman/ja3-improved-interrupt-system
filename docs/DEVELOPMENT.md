@@ -19,7 +19,7 @@ The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"
 
 The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a handler for each entry type. `IISControl.Handle(entry_type, handler)` registers one. The wrapper puts the entries that have a handler in groups. A group holds all entries of one type on one step (`entry[4]`). The `"overwatch"` groups go first, then the `"iis"` groups, then the other types. The list order does not change this order. For each group:
 
-1. `IISControl` checks that the thread can yield, that no interrupt is active, and that the mover is valid and alive. If a check fails, it logs the skip reason and does not call the handler.
+1. `IISControl` checks that the thread can yield, that no interrupt is active, and that the mover is valid, alive and not incapacitated. Thus after an IOS interrupt, the `"iis"` group of the same step starts no interrupt when the overwatchers killed or downed the mover. If a check fails, it logs the skip reason and does not call the handler.
 2. `IISControl` calls the handler with the mover, the first entry of the group, the next interrupt number and the list of all entries of the group. An error in the handler is logged, no interrupt starts, and vanilla gets the entries of the group unchanged.
 3. The handler returns nothing, or a request. If it returns nothing, no interrupt starts and the interrupt number does not change.
 4. A request gives the interrupters (the top interrupter first), the stop step, the Stop decision, the text of the `BEGIN` log line and an optional note for each interrupter.
