@@ -55,6 +55,7 @@ local function ApplyOptions()
 	cfg.moving_target_penalty = tonumber(o.MovingTargetPenalty) or 0
 	cfg.log_checks = o.VerboseLog == true
 	cfg.ios = o.IOS == true
+	cfg.ios_full_aim = o.IOSFullAim == true
 end
 ApplyOptions()
 

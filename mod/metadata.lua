@@ -26,6 +26,7 @@ return PlaceObj('ModDef', {
 		MovingTargetPenalty = "0",
 		VerboseLog = false,
 		IOS = false,
+		IOSFullAim = false,
 	},
 	'TagGameplay', true,
 })

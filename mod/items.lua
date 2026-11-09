@@ -64,6 +64,12 @@ return {
 		'DefaultValue', false,
 	}),
 	PlaceObj('ModItemOptionToggle', {
+		'name', "IOSFullAim",
+		'DisplayName', "<color AmmoMatchColor>IOS full aim under GBO 4</color>",
+		'Help', "Applies only to GBO 4 in old CTH mode. There, an Overwatch shot gets half of the aim bonus. On: an IOS shot gets the full aim bonus. Off: an IOS shot gets half of the aim bonus, as a GBO 4 Overwatch shot does. The shot stays an Overwatch attack, so the Overwatch perks still work. In aCTH mode (the GBO 4 default) and without GBO 4, this option has no effect, because the aim bonus is not halved.",
+		'DefaultValue', false,
+	}),
+	PlaceObj('ModItemOptionToggle', {
 		'name', "VerboseLog",
 		'DisplayName', "<color AmmoTracerColor>Verbose log</color>",
 		'Help', "Also write one log line for each merc in each interrupt check.",
