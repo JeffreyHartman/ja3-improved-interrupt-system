@@ -16,7 +16,7 @@ Release as a beta when all of these are done.
 - [ ] Decide how often interrupts must happen, and set the defaults (#2).
 - [ ] Add enemy interrupts. See [Enemy interrupts](#enemy-interrupts).
 - [ ] Decide if enemy Overwatch must change when enemy interrupts work. See [Overwatch and the Interrupt System](#overwatch-and-the-interrupt-system).
-- [ ] Remove the "End Interrupt at 0 AP" and "Need AP for an attack" options, and always use both rules.
+- [x] Remove the "End Interrupt at 0 AP" and "Need AP for an attack" options, and always use both rules (#28).
 - [ ] Check the GBO 4 Shooting Stance carry-over. GBO 4 saves the carried AP at the end of the turn, so AP that a merc spends in a later interrupt can carry over too.
 - [ ] Change the status line in the README to beta.
 - [ ] Bump the version.

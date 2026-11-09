@@ -7,7 +7,7 @@ A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the e
 ## Features
 
 - **IIS (1.13 default):** each merc registers part of the AP that a seen enemy spends. When the merc's counter reaches its reaction time, the merc interrupts.
-- **Classic:** when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins.
+- **JA2 Classic:** when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins.
 - **Collective interrupts:** teammates near a winner can join the interrupt.
 - **Clear UI:** an INTERRUPT! banner shows at the top of the screen, and the other mercs' portraits are locked. End Turn ends the interrupt.
 - **Stop or continue:** the interrupted enemy stops on its tile and attacks from there, or it continues its move.
@@ -30,22 +30,25 @@ A merc loses its Free Move AP when it enters an interrupt. The interrupt checks 
 
 If a merc hangs during an action, press End Turn two times.
 
-To turn the mod off, set the "Interrupts enabled" option to off. Do not disable the mod in the Mod Manager, because a save that used the mod turns it on again.
+To turn the interrupts off, set the "Interrupt System (Experimental)" option to Off. Do not disable the mod in the Mod Manager, because a save that used the mod turns it on again.
+
+An interrupt ends by itself when no interrupter has the AP for one step. A merc gets an interrupt only if it has the AP for its default attack (1.13 rule).
 
 ## Options
 
-| Option | Default | Effect |
-|---|---|---|
-| Interrupts enabled | on | Turns the mod on or off. |
-| Interrupt system | IIS | IIS or Classic. |
-| Collective interrupts (IIS) | on | Teammates within 5 tiles of a winner can join. |
-| Interrupted enemy | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
-| End interrupt at 0 AP | on | Ends the interrupt when no interrupter has the AP for one step. |
-| Need AP for an attack | on | A merc must have the AP for an attack to interrupt (1.13 rule). |
-| IIS reaction time | 25 | Lower values give more interrupts. |
-| IIS AP registered (%) | 60 | Higher values give more interrupts. |
-| Improved Overwatch System (IOS) | off | The Overwatch trigger of a merc starts an interrupt in place of the Overwatch shot. |
-| Verbose log | off | Writes more detail to the game log. |
+The options list shows each group of options in one color: one color for the Interrupt System, one for IOS, and one for the options of both systems.
+
+| Option | Group | Default | Effect |
+|---|---|---|---|
+| Interrupt System (Experimental) | Interrupt System | IIS | IIS, JA2 Classic or Off. |
+| Collective interrupts (IIS) | Interrupt System | on | Teammates within 5 tiles of a winner can join. |
+| Interrupted enemy | Interrupt System | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
+| IIS reaction time | Interrupt System | 25 | Lower values give more interrupts. |
+| IIS AP registered (%) | Interrupt System | 60 | Higher values give more interrupts. |
+| Improved Overwatch System (IOS) | IOS | off | The Overwatch trigger of a merc starts an interrupt in place of the Overwatch shot. |
+| Verbose log | Both systems | off | Writes more detail to the game log. |
+
+A setting from version 0.7.3 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".
 
 ## Compatibility
 

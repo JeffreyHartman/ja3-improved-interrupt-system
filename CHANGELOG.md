@@ -9,8 +9,14 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 ### Added
 
 - The "Improved Overwatch System (IOS)" option, off by default. When the Overwatch trigger of a merc happens, the merc acts in an interrupt in place of the vanilla Overwatch shot. Its AP in the interrupt is its Overwatch attacks multiplied by the cost of its default attack. The AP that it does not spend stays for the next trigger, and a pass costs nothing. The enemy always continues its action (#29).
+- A "Moving target penalty" option. It gives a to-hit penalty for a merc's shot in an interrupt at the enemy that the interrupt paused, by the design of the vanilla Evasive Movement modifier. The default 0 gives no penalty (#35).
 
 ### Changed
+
+- The "Interrupt System (Experimental)" option has the values IIS, JA2 Classic and Off. It replaces the "JA2 1.13 interrupts (Experimental)" and "Interrupt system" options. "Classic" is now "JA2 Classic". Old settings become the new settings (#28).
+- The "End interrupt at 0 AP" and "Need AP for an attack" options are removed. Their rules are always on (#28).
+- Each option has the color of its group in the options list (#28).
+- The mod description names IIS, JA2 Classic and IOS (#28).
 
 - The code that runs an interrupt is in a new module, `IISControl`. Each entry type of the provoke list has a handler, and the 1.13 checks are the first handler. This prepares Improved Overwatch (#17). The game does not change (#19, #26).
 - The "Interrupted enemy" option is read when the interrupt begins. A change to the option during an interrupt has an effect only on the next interrupt.

@@ -11,8 +11,9 @@
 | `mod/Code/Control.lua` | `IISControl`: the provoke-list wrapper, Free Move removal, the interrupt run, the end of the interrupt and the Stop. It gives control to the interrupters. |
 | `mod/Code/IOS.lua` | `IOS`: the handler for `"overwatch"` entries and the AP pool of each overwatcher. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
+| `mod/Code/MovingTarget.lua` | The "Moving target" to-hit modifier for a shot by an interrupter at the mover. |
 
-`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `IOS.lua`, `UI.lua`. `IOS.lua` adds its engine reads to `IIS.E` and calls `IISControl.Handle`, so it loads after `Control.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
+`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `IOS.lua`, `UI.lua`, `MovingTarget.lua`. `IOS.lua` adds its engine reads to `IIS.E` and calls `IISControl.Handle`, so it loads after `Control.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
 
 The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"` entry to the vanilla interrupt list. It returns nothing for a mover that the Stop stopped. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
 
@@ -64,6 +65,27 @@ These overrides change behavior only while an interrupt is active:
 | `HUDMercClass.SetupStyle` (in `UI.lua`) | Marks the portraits. |
 | `OnMsg.CanSaveGameQuery` | Blocks saves during an interrupt. |
 
+## Options
+
+`mod/items.lua` has the options, and `mod/metadata.lua` has their defaults in `default_options`. `IIS.lua` reads the options into `IIS.Config` when it loads and on `ApplyModOptions`.
+
+Each option has the color tag of its group in its display name:
+
+| Group | Color tag |
+|---|---|
+| Interrupt System | `<color AmmoHPColor>` |
+| IOS | `<color AmmoMatchColor>` |
+| Both systems | `<color AmmoTracerColor>` |
+
+The tags are text styles of the game. GBO 4 and RatoAI use the same text styles for their option groups.
+
+The game does not remove a stored option value when the mod removes the option. Thus the values of version 0.7.3 and earlier stay in the storage:
+
+- `Enabled = false` gives `InterruptSystem = "Off"`.
+- `System = "Classic"` gives `InterruptSystem = "JA2 Classic"`.
+
+`IIS.lua` reads these old values only while no `InterruptSystem` value is stored. It then writes the result into the options, so that the options menu shows it and stores it when the player applies a change. For this reason, `default_options` must not give a default for `InterruptSystem`. When you save the mod in the Mod Editor, the Mod Editor writes `default_options` again from the options. Then remove the `InterruptSystem` default by hand. A test in `tests/test_engine.lua` fails until you do.
+
 ## Tests
 
 Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
@@ -72,8 +94,10 @@ Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
 - `tests/test_memory.lua` checks `IISMemory` with a plain store table.
 - `tests/test_interrupt.lua` checks `IISInterrupt` with a fake clock and plain units.
 - `tests/test_engine.lua` loads `IIS.lua`, `Control.lua` and `IOS.lua` with fake engine functions and the real `IISMemory` and `IISInterrupt`.
+  Its option tests give the options to `IIS.lua` as the game does, and they read `mod/items.lua` and `mod/metadata.lua`.
   Its full interrupt tests go through the provoke-list wrapper. The `sleep` that they give to `IISControl.Setup` advances the game time and runs scripted steps, such as an End Turn press.
 - `tests/test_ui.lua` loads `UI.lua` and checks the combat log text at the start and end of an interrupt, and the banner text of a request.
+- `tests/test_moving_target.lua` loads `MovingTarget.lua` and calls the `CalcValue` of its to-hit modifier with fake units and an active interrupt.
 
 The tests do not cover the rest of `UI.lua` or anything that needs the game.
 
@@ -91,7 +115,7 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 |---|---|
 | `loaded`, `control loaded`, `IOS loaded`, `UI loaded` | The game ran the code files. Each hook status must say `ours`. `IOS loaded` gives the IOS option. |
 | `mods loaded` | The title, id and version of each loaded mod. |
-| `check #N ... TRIGGER` | A check found winners, with their points (Classic) or count and reaction time (IIS). |
+| `check #N ... TRIGGER` | A check found winners, with their points (JA2 Classic) or count and reaction time (IIS). |
 | `trigger in an AI planning check` | The AI ran the same check to group its units. Nothing happens. |
 | `IIS register`, `IIS commit` | A seen enemy action or move added AP to the mercs' counters. |
 | `enemy attack exec begin`, `enemy attack exec end` | An enemy firearm attack started or ended. A `begin` without an `end` means that the enemy's command stopped inside the attack. |

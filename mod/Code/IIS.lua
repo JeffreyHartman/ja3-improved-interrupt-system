@@ -14,15 +14,13 @@ local R = IISRules
 local Mem = IISMemory
 
 IIS.Config = {
-	enabled = true,
-	system = "IIS",              -- "IIS" (the 1.13 default) or "Classic"
+	system = "IIS",              -- "IIS" (the 1.13 default), "JA2 Classic" or "Off"
 	collective = true,           -- IIS collective interrupts, ALLOW_COLLECTIVE_INTERRUPTS
 	after_interrupt = "stop",    -- "stop": the enemy stays on its tile and gets back the AP of the rest of its path; "continue": it walks on
-	auto_end = true,             -- end the interrupt when no interrupter has AP for one step
-	auto_end_delay_ms = 1500,    -- game time after the last action before auto_end ends the interrupt
-	require_attack_ap = true,    -- a winner needs AP for its default attack (TeamTurns.cpp:877)
+	auto_end_delay_ms = 1500,    -- game time after the last action before the auto end ends the interrupt
 	reaction_time = 25,          -- BASIC_REACTION_TIME_LENGTH
 	basic_pct = 60,              -- BASIC_PERCENTAGE_APS_REGISTERED
+	moving_target_penalty = 0,   -- maximum penalty of the Moving target to-hit modifier (MovingTarget.lua)
 	log_checks = false,          -- also log each watcher of each check
 	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
@@ -30,18 +28,31 @@ IIS.Config = {
 	ios = false,                 -- IOS: the Overwatch trigger of a merc starts an interrupt (IOS.lua)
 }
 
+local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
+
+-- The game never removes a stored option that the mod no longer has, so "Enabled" and "System"
+-- of version 0.7.3 and earlier stay in the storage. They are read only while "InterruptSystem" is not
+-- stored, so metadata.lua must not give "InterruptSystem" a default.
+local function InterruptSystemOption(o)
+	local value = rawget(o, "InterruptSystem")
+	if systems[value] then return value end
+	if rawget(o, "Enabled") == false then return "Off" end
+	if rawget(o, "System") == "Classic" then return "JA2 Classic" end
+	return "IIS"
+end
+
 -- The game loads mod options before this code runs.
 local function ApplyOptions()
 	local o = rawget(_G, "CurrentModOptions") or {}
 	local cfg = IIS.Config
-	cfg.enabled = o.Enabled ~= false
-	cfg.system = o.System == "Classic" and "Classic" or "IIS"
+	cfg.system = InterruptSystemOption(o)
+	-- The options menu shows this value, and it stores the value when the player applies a change.
+	rawset(o, "InterruptSystem", cfg.system)
 	cfg.collective = o.Collective ~= false
 	cfg.after_interrupt = o.AfterInterrupt == "Continue" and "continue" or "stop"
-	cfg.auto_end = o.AutoEnd ~= false
-	cfg.require_attack_ap = o.RequireAttackAP ~= false
 	cfg.reaction_time = tonumber(o.ReactionTime) or 25
 	cfg.basic_pct = tonumber(o.BasicPercent) or 60
+	cfg.moving_target_penalty = tonumber(o.MovingTargetPenalty) or 0
 	cfg.log_checks = o.VerboseLog == true
 	cfg.ios = o.IOS == true
 end
@@ -381,7 +392,7 @@ end
 -- Statuses that take a merc out of player control.
 local blocking_status = { "Unconscious", "Downed", "Panicked", "Berserk", "Blinded" }
 
--- A watcher whose AP the mover's actions can register (IIS) or who can duel (classic).
+-- A watcher whose AP the mover's actions can register (IIS) or who can duel (JA2 Classic).
 function IIS.ObserverSkipReason(w, mover)
 	if not IsValid(w) or w:IsIncapacitated() then return "incapacitated" end
 	if not E.CanControlTeam(w) then return "not player controlled" end
@@ -396,11 +407,10 @@ function IIS.WinSkipReason(w, system)
 	local ap = E.APRaw(w)
 	local min = R.MinAP(system, E.WalkRaw(), IIS.RulesConfig())
 	if ap < min then return "AP below minimum" end
-	if IIS.Config.require_attack_ap then
-		local cost = E.AttackCostRaw(w)
-		if cost < 0 or ap < cost then return "AP below attack cost" end
-	end
-	if system == "Classic" then
+	-- A winner needs the AP for its default attack (TeamTurns.cpp:877).
+	local cost = E.AttackCostRaw(w)
+	if cost < 0 or ap < cost then return "AP below attack cost" end
+	if system == "JA2 Classic" then
 		if E.Status(w, "Choking") then return "gassed" end
 		if E.Status(w, "Suppressed") then return "under fire" end
 	end
@@ -408,7 +418,7 @@ end
 
 function IIS.MoverSkipReason(mover, trigger_type, visible_only, return_result)
 	local cfg = IIS.Config
-	if not cfg.enabled then return "disabled" end
+	if cfg.system == "Off" then return "interrupt system off" end
 	if trigger_type ~= "move" and trigger_type ~= "attack reaction" then return "trigger " .. tostring(trigger_type) end
 	-- "any" and "all" come from path previews and trap scans, not from a real action.
 	if return_result then return "preview" end
@@ -442,7 +452,7 @@ local function IsRunning(mover, dummies, first)
 	return mover.stance == "Standing" and #dummies - first + 1 >= 5
 end
 
--- Classic: each watcher that did not see the mover this turn duels at its first step with line of sight.
+-- JA2 Classic: each watcher that did not see the mover this turn duels at its first step with line of sight.
 function IIS.FindClassicMoveTrigger(mover, dummies, n)
 	local stats = IIS.turn_stats
 	local first = FirstStep(mover, dummies)
@@ -450,7 +460,7 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 	local rows = {}
 	local start_target = { pos = mover:GetPos(), stance = mover.stance }
 	for _, w in ipairs(E.PlayerUnits()) do
-		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, "Classic")
+		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, "JA2 Classic")
 		if not skip and (E.SeesNow(w, mover) or Mem.SeenThisTurn(w, mover)) then
 			skip = "saw mover this turn"
 		end
@@ -546,7 +556,7 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 	return idx, winners, rows, plan
 end
 
--- Classic after an attack: a target that did not see the attacker duels it (NoticeUnseenAttacker,
+-- JA2 Classic after an attack: a target that did not see the attacker duels it (NoticeUnseenAttacker,
 -- opplist.cpp:7386). IIS after an attack: every watcher with a full counter that sees the attacker
 -- or was attacked wins (AFTERSHOT_INTERRUPT).
 function IIS.FindAttackTrigger(mover, n)
@@ -560,7 +570,7 @@ function IIS.FindAttackTrigger(mover, n)
 		if skip then
 			Count(stats.watcher_skips, skip)
 			Verbose("  check #%d watcher %s skipped: %s", n, Name(w), skip)
-		elseif system == "Classic" then
+		elseif system == "JA2 Classic" then
 			if not targeted then
 				Verbose("  check #%d watcher %s: not attacked", n, Name(w))
 			elseif E.SeesNow(w, mover) then
@@ -592,7 +602,7 @@ function IIS.FindAttackTrigger(mover, n)
 		end
 	end
 	local winners
-	if system == "Classic" then
+	if system == "JA2 Classic" then
 		winners = {}
 		for _, row in ipairs(rows) do
 			if row.won then
@@ -639,7 +649,7 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 
 	local idx, winners, rows, plan
 	if trigger_type == "move" then
-		if system == "Classic" then
+		if system == "JA2 Classic" then
 			idx, winners, rows = IIS.FindClassicMoveTrigger(mover, dummies, n)
 		else
 			-- After a vanilla interrupt earlier on the path, CombatGoto checks the rest of the path.
@@ -860,7 +870,7 @@ function OnMsg.RunCombatAction(action_id, unit, ap)
 	Log("enemy action %s unit=%s cost=%s ap_left=%s pos=%s behavior=%s status=%s",
 		tostring(action_id), Name(unit), FormatAP(ap), AP(unit), Pos(unit),
 		tostring(behavior and (behavior.id or behavior.class)), StatusList(unit))
-	if IIS.Config.enabled and IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0
+	if IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0
 		and g_AIExecutionController and E.IsAITurnEnemy(unit) then
 		local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
 		if not ok then
@@ -1013,9 +1023,10 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: enabled=%s system=%s collective=%s after_interrupt=%s auto_end=%s require_attack_ap=%s reaction_time=%s basic_pct=%s verbose=%s ios=%s",
-		why, tostring(c.enabled), c.system, tostring(c.collective), c.after_interrupt, tostring(c.auto_end),
-		tostring(c.require_attack_ap), tostring(c.reaction_time), tostring(c.basic_pct), tostring(c.log_checks), tostring(c.ios))
+	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s",
+		why, c.system, tostring(c.collective), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
+		tostring(c.moving_target_penalty),
+		tostring(c.log_checks), tostring(c.ios))
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks
