@@ -16,18 +16,28 @@
 
 The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"` entry to the vanilla interrupt list. It returns nothing for a mover that the Stop stopped. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
 
-The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a handler for each entry type. `IISControl.Handle(entry_type, handler)` registers one. For each entry that has a handler:
+The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a handler for each entry type. `IISControl.Handle(entry_type, handler)` registers one. The wrapper puts the entries that have a handler in groups. A group holds all entries of one type on one step (`entry[4]`). The `"overwatch"` groups go first, then the `"iis"` groups, then the other types. The list order does not change this order. For each group:
 
 1. `IISControl` checks that the thread can yield, that no interrupt is active, and that the mover is valid and alive. If a check fails, it logs the skip reason and does not call the handler.
-2. `IISControl` calls the handler with the mover, the entry and the next interrupt number.
+2. `IISControl` calls the handler with the mover, the first entry of the group, the next interrupt number and the list of all entries of the group.
 3. The handler returns nothing, or a request. If it returns nothing, no interrupt starts and the interrupt number does not change.
-4. A request gives the interrupters (the top interrupter first), the stop step, the Stop decision, the text of the `BEGIN` log line and an optional note for each interrupter. `IISControl` removes the Free Move AP of each interrupter and runs the interrupt.
+4. A request gives the interrupters (the top interrupter first), the stop step, the Stop decision, the text of the `BEGIN` log line and an optional note for each interrupter.
+5. The handler takes each entry of the group whose unit (`entry[2]`) is an interrupter. The wrapper changes the type of a taken entry to `IISControl.HANDLED` (`"iis_handled"`).
+6. `IISControl` removes the Free Move AP of each interrupter and runs the interrupt.
+
+A request can also have these fields for each interrupter:
+
+| Field | What it does |
+|---|---|
+| `ap_grants[unit]` | A raw AP value. At the start, `IISControl` sets the interrupter's AP to the grant. At the end, it puts back the AP that the interrupter had before the grant. It writes `ActionPoints` directly, because `Unit:GainAP` does nothing for a unit on Overwatch. |
+| `on_end(ap_left)` | A function. At the end, `IISControl` calls it with the raw AP that each granted interrupter had left. |
+| `action_limits[unit]` | A function `limit(action_id, target)`. The `StartCombatAction` override calls it before it takes the AP. When the limit does not return true, or fails, the action does not start and costs no AP. |
 
 The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter in `IIS.lua`. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
 
 When the interrupt starts, `IISControl` takes engine state from the game, and it gives the state back when the interrupt ends. The takeover list in `Control.lua` holds each take together with its give-back: the mover destructor, the visibility override, the camera locks, the AI camera fields and the player control. The start runs the list from the top, and the end runs it from the bottom. An error in one give-back is logged, and the other give-backs still run. The selection and the interface mode are taken but not given back. The counters for the `END` log line are in a separate table.
 
-After the handlers, the wrapper gives the full list to vanilla. Vanilla ignores the `"iis"` entry type. An entry type with no handler, such as a vanilla `"overwatch"` entry, goes to vanilla unchanged.
+After the handlers, the wrapper gives the full list to vanilla. Vanilla ignores the `"iis"` and `"iis_handled"` entry types, so it fires no attack for them. It still adds each entry to the mover's `passed_interrupts`, so the unit of a taken entry cannot trigger again in the same mover command. An entry that no handler took, and an entry type with no handler, go to vanilla unchanged.
 
 These overrides change behavior only while an interrupt is active:
 
@@ -36,7 +46,7 @@ These overrides change behavior only while an interrupt is active:
 | `IsNetPlayerTurn` | Returns true. The UI and the action start code ask it whose turn it is. |
 | `Unit:CanBeControlled` | True for the interrupters. False, with the reason `iis_not_interrupter`, for the other player units. |
 | `CombatActionCannotBeStarted` | Counts only the interrupters' running actions. The frozen enemy's action never ends during the interrupt. |
-| `StartCombatAction` | Runs the interrupters' actions in a queue with the vanilla start rule. |
+| `StartCombatAction` | Runs the interrupters' actions in a queue with the vanilla start rule. It refuses an action that the interrupter's action limit refuses. |
 | `Unit:IsIdleOrRunningBehavior` | Returns true for the frozen enemy, because `Unit:FirearmAttack` waits until its target is idle. |
 | `WaitOtherCombatActionsEnd` | An interrupter waits only for the other interrupters. |
 | `IModeCombatMovement:OnMouseButtonDown` | Sets `g_CurrentTeam` to the player team during the click handler. |
