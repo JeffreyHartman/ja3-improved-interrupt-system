@@ -65,6 +65,7 @@ local function ApplyOptions()
 	cfg.ios_actions = o.IOSActions == "Any action" and "any" or "shot"
 	cfg.ios_aim_limit = AimLimitOption(o.IOSAimLimit)
 	cfg.interrupt_aim_limit = AimLimitOption(o.InterruptAimLimit)
+	cfg.ios_full_aim = o.IOSFullAim == true
 end
 ApplyOptions()
 
