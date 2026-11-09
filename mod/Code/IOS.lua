@@ -63,6 +63,25 @@ local function ActionLimit(m, ends)
 	end
 end
 
+-- True while KillzoneAim runs, because Rat_KillzoneAim calls Unit:GetBaseAimLevelRange.
+local in_killzone_aim
+
+-- Returns the free aim levels of Killzone for the shot of `m` at `target`: the GBO 4 Killzone
+-- ladder value when GBO 4 is loaded, otherwise 1. Unit:GetAttackAPCost gives the weapon as the
+-- target, so a target that is not a unit counts as `mover`.
+local function KillzoneAim(m, action, target, mover)
+	local gbo_aim = rawget(_G, "Rat_KillzoneAim")
+	if not gbo_aim then
+		return E.Perk(m, "Killzone") and 1 or 0
+	end
+	if in_killzone_aim then return 0 end
+	in_killzone_aim = true
+	local ok, aim = pcall(gbo_aim, m, IsKindOf(target, "Unit") and target or mover, 0, action)
+	in_killzone_aim = false
+	if not ok then error(aim, 0) end
+	return aim or 0
+end
+
 --- Returns the raw AP pool of an Overwatch state.
 -- The stored pool is used only when the game has not changed the attack count or the turn since
 -- IOS stored it. Otherwise, as for an Overwatch state from an old save or a set-up machine gun
@@ -154,6 +173,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 	mover:RemoveStatusEffect("Hidden")
 	E.LogOverwatchReveal(mover)
 
+	local free_aim = IIS.Config.ios_free_aim
 	ios_interrupt = n
 	return {
 		interrupters = overwatchers,
@@ -163,6 +183,9 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 		notes = notes,
 		banner = "Overwatch",
 		aim_limit = IIS.Config.ios_aim_limit,
+		free_aim = function(m, action, target)
+			return Max(free_aim, KillzoneAim(m, action, target, mover))
+		end,
 		ap_grants = grants,
 		action_limits = limits,
 		on_end = function(ap_left)

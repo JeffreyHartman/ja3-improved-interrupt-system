@@ -12,7 +12,7 @@
 | `mod/Code/IOS.lua` | `IOS`: the handler for `"overwatch"` entries and the AP pool of each overwatcher. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
 | `mod/Code/MovingTarget.lua` | The "Moving target" to-hit modifier for a shot by an interrupter at the mover. |
-| `mod/Code/Aim.lua` | The wrap of `Unit:GetBaseAimLevelRange` that applies the aim limit of the active interrupt. |
+| `mod/Code/Aim.lua` | The wrap of `Unit:GetBaseAimLevelRange` that applies the free aim levels and the aim limit of the active interrupt. |
 
 `mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `IOS.lua`, `UI.lua`, `MovingTarget.lua`, `Aim.lua`. `IOS.lua` adds its engine reads to `IIS.E` and calls `IISControl.Handle`, so it loads after `Control.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
 
@@ -35,6 +35,7 @@ A request can also have these fields for each interrupter:
 | `on_end(ap_left)` | A function. At the end, `IISControl` calls it with the raw AP that each granted interrupter had left. |
 | `banner` | A text. The banner shows "`banner`: interrupter names" in place of "INTERRUPT!". |
 | `aim_limit` | A percent. The maximum aim level of each interrupter is this percent of the maximum that the game gives, rounded up, and never below the minimum. The `"iis"` handler gives the "Interrupt aim limit" option, and the `"overwatch"` handler gives the "IOS aim limit" option, both read when the interrupt starts. |
+| `free_aim` | A function `free_aim(unit, action, target)` that returns a number of aim levels. The minimum aim level of each interrupter is at least this number, and never above the maximum that the game gives. The levels up to the minimum cost no AP, because `Unit:GetAttackAPCost` charges only for the levels above the minimum. The `"overwatch"` handler gives the higher of the "IOS free aim levels" option, read when the interrupt starts, and the Killzone value. |
 | `action_limits[unit]` | A function `limit(action_id, target)`. The `StartCombatAction` override calls it before it takes the AP. When the limit does not return true, or fails, the action does not start and costs no AP. |
 
 The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter in `IIS.lua`. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
@@ -53,7 +54,9 @@ Under GBO 4 in old CTH mode, the `CalcValue` of the `Aim` to-hit modifier halves
 
 The pool is in the Overwatch state, `g_Overwatch[unit]`, which the game saves. `ios_pool` is the raw AP, and `ios_count` and `ios_turn` are the attack count and the combat turn when IOS stored it. When the game changed the attack count or the turn since then, or when the state has no pool (a save from before IOS), the pool is `num_attacks` multiplied by the cost of one default attack. Thus a set-up machine gun gets its pool from the attack count that the game calculates again at each turn start. The handler gets each cost from `E.AttackCostRaw`, a live game call.
 
-`Aim.lua` wraps `Unit:GetBaseAimLevelRange` on `ModsReloaded`, and `IISControl.Request()` gives it the request of the active interrupt. The wrap calls the function that was in place and changes its result only while an interrupt is active, for an interrupter, when the request has an `aim_limit`. GBO 4 replaces the function when its code loads, and its version calls the vanilla one. Thus, in either load order, the chain is the wrap of this mod, then GBO 4, then vanilla. The wrap checks its identity, so a second `ModsReloaded` does not wrap it again.
+`Aim.lua` wraps `Unit:GetBaseAimLevelRange` on `ModsReloaded`, and `IISControl.Request()` gives it the request of the active interrupt. The wrap calls the function that was in place and changes its result only while an interrupt is active, for an interrupter, when the request has an `aim_limit` or a `free_aim`. It raises the minimum first, then it lowers the maximum. GBO 4 replaces the function when its code loads, and its version calls the vanilla one. Thus, in either load order, the chain is the wrap of this mod, then GBO 4, then vanilla. The wrap checks its identity, so a second `ModsReloaded` does not wrap it again.
+
+The Killzone value of an overwatcher is the result of the GBO 4 function `Rat_KillzoneAim` with the aim 0, when that global exists. The mod finds GBO 4 by this function, so the load order does not matter. Without GBO 4, the value is 1 for a merc with the Killzone perk and 0 for other mercs. `Rat_KillzoneAim` calls `Unit:GetBaseAimLevelRange`, and that call gets no Killzone value, so the wrap does not call itself without end. `Unit:GetAttackAPCost` gives the weapon as the target, so a target that is not a unit counts as the mover. The GBO 4 Shooting Stance is already in the minimum that the game gives, so it counts toward the free aim levels.
 
 When the interrupt starts, `IISControl` takes engine state from the game, and it gives the state back when the interrupt ends. The takeover list in `Control.lua` holds each take together with its give-back: the mover destructor, the visibility override, the camera locks, the AI camera fields and the player control. The start runs the list from the top, and the end runs it from the bottom. An error in one give-back is logged, and the other give-backs still run. The selection and the interface mode are taken but not given back. The counters for the `END` log line are in a separate table.
 
@@ -108,7 +111,7 @@ Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
 - `tests/test_ui.lua` loads `UI.lua` and checks the combat log text at the start and end of an interrupt, and the banner text of a request.
 - `tests/test_moving_target.lua` loads `MovingTarget.lua` and calls the `CalcValue` of its to-hit modifier with fake units and an active interrupt.
 
-`tests/test_engine.lua` also loads `Aim.lua`. Its aim limit tests call the wrapped `Unit:GetBaseAimLevelRange` during an IOS or IIS interrupt through the provoke-list wrapper, also over a fake GBO 4 wrap.
+`tests/test_engine.lua` also loads `Aim.lua`. Its aim limit and free aim tests call the wrapped `Unit:GetBaseAimLevelRange` during an IOS or IIS interrupt through the provoke-list wrapper, also over a fake GBO 4 wrap, Shooting Stance and Killzone ladder.
 
 The tests do not cover the rest of `UI.lua` or anything that needs the game.
 
@@ -136,7 +139,7 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 | `INT #N ... refused by the action limit` | The interrupter's action limit refused an action, for example a move by an overwatcher with "IOS actions = Shot only". The action did not start and cost no AP. |
 | `IOS: overwatcher ... cannot pay for an attack` | The pool of a merc on Overwatch is below the cost of one attack, so vanilla gets its entry. |
 | `aim range hook: ours` | `Aim.lua` wrapped `Unit:GetBaseAimLevelRange` on `ModsReloaded`. `REPLACED` means that another mod replaced the wrap. |
-| `INT #N aim limit failed` | The aim limit failed with a Lua error. The shot gets the aim range of the game. |
+| `INT #N aim range failed` | The free aim levels or the aim limit failed with a Lua error. The shot gets the aim range of the game. |
 | `INT #- <type> handler failed` | A provoke-list handler failed. Vanilla gets the entries of that group. |
 | `INT #N collective` | A collective interrupt roll, or the reason that a teammate did not roll. |
 | `INT #N run action`, `action ended` | An interrupter action started or ended. |
