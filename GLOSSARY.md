@@ -110,3 +110,17 @@ AP that a unit gets at turn start and can spend only on moves. The unit loses th
 **1.13 AP**:
 An AP amount on the JA2 1.13 scale, converted from JA3 AP at the same rate for every unit.
 _Avoid_: points, scale-100 AP
+
+**Pool**:
+The raw AP of an overwatcher's Overwatch attacks: the attack count multiplied by the cost of one default attack. The overwatcher pays for its actions in an IOS interrupt from it, and the AP that it does not spend stays for the next Overwatch trigger.
+_Avoid_: budget
+
+### Aim
+
+**Aim limit**:
+The percent of the weapon's maximum aim levels that an interrupter can use in an interrupt, rounded up. It never goes below the minimum aim level of the shot.
+_Avoid_: aim cap
+
+**Free aim levels**:
+The minimum aim level of an overwatcher's shot in an IOS interrupt. The levels up to the minimum cost no AP. The value is a total, so a shot that already has a higher minimum keeps it.
+_Avoid_: aim bonus, free aim (the vanilla attack without a target)
