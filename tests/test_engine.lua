@@ -156,6 +156,16 @@ Unit = {
 	end,
 	CanBeControlled = function() return "vanilla" end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
+	-- Like vanilla, it returns a copy of `args` with the attacker and the weapon of the action.
+	PrepareAttackArgs = function(unit, action_id, args)
+		local attack_args = {}
+		for k, v in pairs(args or {}) do
+			attack_args[k] = v
+		end
+		attack_args.action_id, attack_args.obj = action_id, unit
+		attack_args.weapon = attack_args.weapon or unit.weapon
+		return attack_args
+	end,
 }
 function IsNetPlayerTurn() return "vanilla" end
 function CombatActionCannotBeStarted() return "vanilla" end
@@ -1862,6 +1872,127 @@ t.case("IOS: the AP of a queued action that never started goes back to the pool"
 	t.eq(LogHas("dropped queued action Attack of ow#ow, refunded 4000 raw AP"), true)
 	t.eq(g_Overwatch[ow].num_attacks, 2)
 	t.eq(ow.ActionPoints, 0)
+end)
+
+------------------------------------------------------------------------------------------------
+-- The attack args of a shot in an interrupt
+
+local rifle = { kinds = { Firearm = true } }
+
+-- Like vanilla, Firearm:GetAttackResults gives the attack args to Unit:CalcChanceToHit.
+function rifle:GetAttackResults(action, attack_args)
+	return { chance_to_hit = attack_args.obj:CalcChanceToHit(attack_args.target, action, attack_args) }
+end
+
+-- Like vanilla, CombatAction:GetActionResults makes the attack args with Unit:PrepareAttackArgs.
+-- The crosshair calls it for the to-hit preview, and Unit:FirearmAttack calls it for the attack.
+function CombatActions.Attack:GetActionResults(unit, args)
+	local attack_args = unit:PrepareAttackArgs("Attack", args)
+	return attack_args.weapon:GetAttackResults(self, attack_args), attack_args
+end
+
+-- Gives `unit` the weapon `weapon`, and records the args of each to-hit calculation in `unit.cth_args`.
+local function Armed(unit, weapon)
+	unit.weapon = weapon or rifle
+	unit.cth_args = {}
+	function unit:PrepareAttackArgs(...)
+		return Unit.PrepareAttackArgs(self, ...)
+	end
+	function unit:CalcChanceToHit(_, _, args)
+		self.cth_args[#self.cth_args + 1] = args
+		return 50
+	end
+	return unit
+end
+
+-- Returns the args of the to-hit calculation of the crosshair preview of a shot of `unit` at `target`.
+local function PreviewArgs(unit, target)
+	CombatActions.Attack:GetActionResults(unit, { target = target })
+	return unit.cth_args[#unit.cth_args]
+end
+
+t.case("IOS: the to-hit preview of an overwatcher's shot is an Overwatch opportunity attack", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Armed(Overwatcher{})
+	SetIOS(true)
+	local args
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() args = PreviewArgs(ow, mover) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(args.opportunity_attack, true)
+	t.eq(args.opportunity_attack_type, "Overwatch")
+	local after = PreviewArgs(ow, mover)
+	t.eq(after.opportunity_attack, nil)
+	t.eq(after.opportunity_attack_type, nil)
+end)
+
+-- Runs `f` with a RunCombatAction that, like Unit:FirearmAttack, gets the attack args from
+-- CombatAction:GetActionResults. Returns the attack args of each action that ran.
+local function WithFiringAttacks(f)
+	local fired = {}
+	local saved = RunCombatAction
+	function RunCombatAction(action_id, unit, ap, args)
+		saved(action_id, unit, ap, args)
+		local _, attack_args = CombatActions[action_id]:GetActionResults(unit, args)
+		fired[#fired + 1] = attack_args
+	end
+	local ok, err = pcall(f)
+	RunCombatAction = saved
+	if not ok then error(err, 0) end
+	return fired
+end
+
+t.case("IOS: the attack args of an overwatcher's shot make it an Overwatch opportunity attack", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Armed(Overwatcher{ attacks = 2, cost = 4000 })
+	SetIOS(true)
+	local fired = WithFiringAttacks(function()
+		OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 4000) }, { at = 300, run = PressEndTurn } })
+	end)
+	t.eq(#fired, 1)
+	t.eq(fired[1].opportunity_attack, true)
+	t.eq(fired[1].opportunity_attack_type, "Overwatch")
+	t.eq(ow.cth_args[1].opportunity_attack, true)
+	t.eq(ow.cth_args[1].opportunity_attack_type, "Overwatch")
+end)
+
+t.case("IOS: the to-hit preview of an overwatcher's attack with a weapon that is not a firearm is not an opportunity attack", function()
+	local mover, _, dummies = WalkingMover(10)
+	local knife = { kinds = { MeleeWeapon = true }, GetAttackResults = rifle.GetAttackResults }
+	local ow = Armed(Overwatcher{}, knife)
+	SetIOS(true)
+	local args
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() args = PreviewArgs(ow, mover) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(args.opportunity_attack, nil)
+	t.eq(args.opportunity_attack_type, nil)
+end)
+
+t.case("IIS: the to-hit preview and the attack args of a winner's shot are not an opportunity attack", function()
+	local mover, a, dummies = WalkingMover(10)
+	Armed(a)
+	SetIOS(true)
+	local preview
+	FakeControl{
+		{ at = 100, run = function()
+			preview = PreviewArgs(a, mover)
+			StartCombatAction("Attack", a, 4000, { target = mover })
+		end },
+		{ at = 300, run = PressEndTurn },
+	}
+	local fired = WithFiringAttacks(function()
+		local list = Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies)
+		Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	end)
+	game_time = 0
+	t.eq(preview.opportunity_attack, nil)
+	t.eq(preview.opportunity_attack_type, nil)
+	t.eq(#fired, 1)
+	t.eq(fired[1].opportunity_attack, nil)
+	t.eq(fired[1].opportunity_attack_type, nil)
 end)
 
 t.case("IOS: an error in the handler is logged, and the enemy action continues with the vanilla shot", function()
