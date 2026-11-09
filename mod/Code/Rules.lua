@@ -9,7 +9,7 @@ IISRules = {}
 local R = IISRules
 
 R.Defaults = {
-	min_aps_to_interrupt = 16, -- APBPConstants.ini MIN_APS_TO_INTERRUPT (classic)
+	min_aps_to_interrupt = 16, -- APBPConstants.ini MIN_APS_TO_INTERRUPT (JA2 Classic)
 	iis_min_ap = 4,            -- hard-coded in ResolvePendingInterrupt, Soldier Control.cpp:24849
 	basic_pct_registered = 60, -- Ja2_Options.INI BASIC_PERCENTAGE_APS_REGISTERED
 	pct_per_level = 4,         -- PERCENTAGE_APS_REGISTERED_PER_EXP_LEVEL
@@ -47,13 +47,13 @@ function R.To113AP(raw)
 	return idiv(raw * 100 + idiv(raw_ap_for_100_113_ap, 2), raw_ap_for_100_113_ap)
 end
 
--- Smallest raw AP a watcher needs to get an interrupt. Classic: MIN_APS_TO_INTERRUPT, and at
+-- Smallest raw AP a watcher needs to get an interrupt. JA2 Classic: MIN_APS_TO_INTERRUPT, and at
 -- least one step or stance change (TeamTurns.cpp:1613, :1741). IIS: 4 1.13 AP (Soldier Control.cpp:24849).
 function R.MinAP(system, step_raw, cfg)
 	cfg = cfg or R.Defaults
-	local ap113 = system == "Classic" and cfg.min_aps_to_interrupt or cfg.iis_min_ap
+	local ap113 = system == "JA2 Classic" and cfg.min_aps_to_interrupt or cfg.iis_min_ap
 	local min = idiv(raw_ap_for_100_113_ap * ap113 + 99, 100)
-	if system == "Classic" and step_raw and step_raw > min then
+	if system == "JA2 Classic" and step_raw and step_raw > min then
 		min = step_raw
 	end
 	return min
@@ -215,7 +215,7 @@ function R.OrderWinners(winners)
 	return winners
 end
 
--- Classic trigger: each watcher duels at its first step with line of sight.
+-- JA2 Classic trigger: each watcher duels at its first step with line of sight.
 -- watchers[i]: first_los (step index or nil), won, margin
 -- Returns the earliest step with a winner, and all winners at that step.
 function R.FindClassicTrigger(watchers)

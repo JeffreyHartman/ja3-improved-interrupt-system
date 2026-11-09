@@ -5,7 +5,7 @@ local I = IISInterrupt
 
 local clock, combat
 
-local cfg = { auto_end = true, auto_end_delay_ms = 1500, stuck_ms = 10000 }
+local cfg = { auto_end_delay_ms = 1500, stuck_ms = 10000 }
 
 local function Unit(id, o)
 	o = o or {}

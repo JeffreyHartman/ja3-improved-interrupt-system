@@ -222,7 +222,7 @@ function Interrupt:EndReason()
 	if self.forced_end then return "forced_end" end
 	local is_busy = self:Busy()
 	if self.end_request and not is_busy then return "end_request" end
-	if cfg.auto_end and self.actions > 0 and not is_busy and self:OutOfAP()
+	if self.actions > 0 and not is_busy and self:OutOfAP()
 		and now() - self.last_activity >= cfg.auto_end_delay_ms then
 		return "auto_end"
 	end
