@@ -143,6 +143,16 @@ local vanilla_result = {}
 local vanilla_provoked = {}
 local vanilla_attacks = {}
 local function vanilla_aim_range(self) return self.min_aim or 0, self.max_aim or 3 end
+-- Like vanilla, it returns a copy of `args` with the attacker and the weapon of the action.
+local function vanilla_prepare_attack_args(unit, action_id, args)
+	local attack_args = {}
+	for k, v in pairs(args or {}) do
+		attack_args[k] = v
+	end
+	attack_args.action_id, attack_args.obj = action_id, unit
+	attack_args.weapon = attack_args.weapon or unit.weapon
+	return attack_args
+end
 -- Like vanilla, the fake list function attacks for each "overwatch" entry and adds every entry to
 -- the mover's passed_interrupts.
 Unit = {
@@ -162,16 +172,7 @@ Unit = {
 	CanBeControlled = function() return "vanilla" end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
 	GetBaseAimLevelRange = vanilla_aim_range,
-	-- Like vanilla, it returns a copy of `args` with the attacker and the weapon of the action.
-	PrepareAttackArgs = function(unit, action_id, args)
-		local attack_args = {}
-		for k, v in pairs(args or {}) do
-			attack_args[k] = v
-		end
-		attack_args.action_id, attack_args.obj = action_id, unit
-		attack_args.weapon = attack_args.weapon or unit.weapon
-		return attack_args
-	end,
+	PrepareAttackArgs = vanilla_prepare_attack_args,
 }
 function IsNetPlayerTurn() return "vanilla" end
 function CombatActionCannotBeStarted() return "vanilla" end
@@ -204,6 +205,8 @@ dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
 dofile("mod/Code/IOS.lua")
 dofile("mod/Code/Aim.lua")
+-- A mod whose code loads after this mod's code wraps this function.
+local prepare_attack_args_after_load = Unit.PrepareAttackArgs
 -- The game sends ModsReloaded after it runs the code files.
 OnMsg.ModsReloaded()
 
@@ -400,6 +403,14 @@ t.case("Options: a stored Interrupt System value wins over the old values that s
 	ApplyModOptions({})
 end)
 
+t.case("Options: the log line of the options gives IOS full aim under GBO 4", function()
+	log_lines = {}
+	ApplyModOptions({ IOSFullAim = true })
+	t.eq(LogHas("mod options applied: .* ios_full_aim=true"), true)
+	ApplyModOptions({})
+	t.eq(Q.Config.ios_full_aim, false)
+end)
+
 t.case("Options: with no stored value, the Interrupt System is IIS", function()
 	t.eq(ApplyModOptions({}).InterruptSystem, "IIS")
 	t.eq(Q.Config.system, "IIS")
@@ -450,6 +461,26 @@ t.case("The options list: no removed option, and each option has the color tag o
 	t.eq(names.IOSActions.DefaultValue, "Shot only")
 	t.eq(names.IOSActions.DisplayName:match("<color (%w+)>"), group_colors.IOS)
 	t.eq(names.IOSActions.Help:find("GBO 4") ~= nil, true)
+end)
+
+t.case("The options list: the help text of each option says what changes under GBO 4", function()
+	for _, item in ipairs(LoadModFile("mod/items.lua")) do
+		if item.class:find("^ModItemOption") then
+			t.eq(item.Help:find("GBO 4", 1, true) ~= nil, true, item.name)
+		end
+	end
+end)
+
+t.case("The README options table has a row for each option", function()
+	local file = io.open("README.md")
+	local readme = file:read("a")
+	file:close()
+	for _, item in ipairs(LoadModFile("mod/items.lua")) do
+		if item.class:find("^ModItemOption") then
+			local name = item.DisplayName:match("^<color %w+>(.*)</color>$")
+			t.eq(readme:find("\n| " .. name .. " |", 1, true) ~= nil, true, name)
+		end
+	end
 end)
 
 t.case("Options: IOS actions gives the action limit of an overwatcher, and Shot only is the default", function()
@@ -507,6 +538,18 @@ t.case("WinSkipReason: the AP minimum does not depend on the watcher's max AP", 
 	ResetWorld()
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 1500, max_ap = 6000, attack_cost = 1000 }), "JA2 Classic"), "AP below minimum")
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 500, max_ap = 24000, attack_cost = 500 }), "IIS"), nil)
+end)
+
+t.case("WinSkipReason: a merc on Overwatch that has AP wins no IIS or JA2 Classic interrupt", function()
+	ResetWorld()
+	local a = FakeUnit({ id = "a", ap = 10000 })
+	local saved = rawget(_G, "g_Overwatch")
+	g_Overwatch = { [a] = { num_attacks = 2, triggered_by = {} } }
+	local iis, classic = Q.WinSkipReason(a, "IIS"), Q.WinSkipReason(a, "JA2 Classic")
+	g_Overwatch = saved
+	t.eq(iis, "on Overwatch")
+	t.eq(classic, "on Overwatch")
+	t.eq(Q.WinSkipReason(a, "IIS"), nil)
 end)
 
 t.case("WinSkipReason: Free Move AP does not pay for the attack or the AP minimum", function()
@@ -1688,6 +1731,7 @@ local reveal_logs = {}
 E.LogOverwatchReveal = function(mover) reveal_logs[#reveal_logs + 1] = mover end
 
 E.InOverwatchCone = function(u, target) return world.cone[u] and world.cone[u][target] or false end
+E.CrosshairTarget = function(u) return world.crosshair and world.crosshair[u] end
 
 local function SetIOS(on, actions)
 	ApplyModOptions({ IOS = on, IOSActions = actions })
@@ -1990,6 +2034,39 @@ t.case("IOS Any action: a move ends Overwatch after the interrupt", function()
 	t.eq(ow.ActionPoints, 0)
 end)
 
+t.case("IOS Any action: a queued move that never started does not end Overwatch", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 4000 }
+	SetIOS(true, "Any action")
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			CombatActions_RunningState[ow] = "start"
+			StartCombatAction("Move", ow, 1000, { goto_pos = { x = 9, y = 9 } })
+		end },
+		{ at = 200, run = function() CombatActions_RunningState[ow] = nil end },
+		{ at = 300, run = PressEndTurn },
+		{ at = 400, run = PressEndTurn },
+	})
+	t.eq(LogHas("dropped queued action Move of ow#ow"), true)
+	t.eq(#ran_actions, 0)
+	t.eq(g_Overwatch[ow] ~= nil, true)
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+end)
+
+t.case("IOS Any action: a stance change ends Overwatch after the interrupt", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 4000 }
+	SetIOS(true, "Any action")
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() StartCombatAction("StanceCrouch", ow, 1000, {}) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(#ran_actions, 1)
+	t.eq(ran_actions[1][1], "StanceCrouch")
+	t.eq(g_Overwatch[ow], nil)
+	t.eq(LogHas("overwatcher ow#ow started StanceCrouch, Overwatch ends"), true)
+end)
+
 t.case("IOS Any action: an attack keeps Overwatch while the pool can pay for one attack", function()
 	local mover, _, dummies = WalkingMover(10)
 	local ow = Overwatcher{ attacks = 3, cost = 4000 }
@@ -2102,6 +2179,54 @@ t.case("IOS: the to-hit preview of an overwatcher's attack with a weapon that is
 	})
 	t.eq(args.opportunity_attack, nil)
 	t.eq(args.opportunity_attack_type, nil)
+end)
+
+-- Like GBO 4 (FEATURE_StepOutGate.lua), a wrap that calls the function that was in place when its
+-- code loaded. It records the args that it gets from that function in `seen`.
+local function GBOAttackArgsWrap(loaded, seen)
+	return function(self, action_id, args)
+		local attack_args = loaded(self, action_id, args)
+		seen[#seen + 1] = attack_args.opportunity_attack or false
+		return attack_args
+	end
+end
+
+-- Returns the preview args of an overwatcher's shot and what a GBO 4 wrap saw. `gbo_first` puts the
+-- GBO 4 code before this mod's code in the load order.
+local function PreviewOverGBOWrap(gbo_first)
+	local seen = {}
+	local loaded = gbo_first and vanilla_prepare_attack_args or prepare_attack_args_after_load
+	Unit.PrepareAttackArgs = GBOAttackArgsWrap(loaded, seen)
+	OnMsg.ModsReloaded()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Armed(Overwatcher{})
+	SetIOS(true)
+	local args
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() args = PreviewArgs(ow, mover) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	Unit.PrepareAttackArgs = vanilla_prepare_attack_args
+	OnMsg.ModsReloaded()
+	return args, seen
+end
+
+t.case("IOS: in either load order with GBO 4, the preview is an Overwatch opportunity attack, and GBO 4 sees the args of the game", function()
+	for _, gbo_first in ipairs{ true, false } do
+		local args, seen = PreviewOverGBOWrap(gbo_first)
+		t.eq(args.opportunity_attack, true, tostring(gbo_first))
+		t.eq(args.opportunity_attack_type, "Overwatch", tostring(gbo_first))
+		t.eq(#seen, 1, tostring(gbo_first))
+		t.eq(seen[1], false, tostring(gbo_first))
+	end
+end)
+
+t.case("IOS: the attack args hook is in place after a second ModsReloaded", function()
+	log_lines = {}
+	OnMsg.ModsReloaded()
+	OnMsg.ModsReloaded()
+	t.eq(LogHas("attack args hook: ours"), true)
+	t.eq(LogHas("attack args hook: REPLACED"), false)
 end)
 
 t.case("IIS: the to-hit preview and the attack args of a winner's shot are not an opportunity attack", function()
@@ -2691,6 +2816,11 @@ t.case("Free aim: under GBO 4, the option value applies when it is higher than t
 	t.eq(KillzoneAimRange(ow, 1, { IOSFreeAim = "2" }), 2)
 end)
 
+-- Like Unit:GetAttackAPCost, it asks for the aim range with the weapon as the target.
+local function CostAimMin(u)
+	return (Unit.GetBaseAimLevelRange(u, aim_action, { kinds = { Firearm = true } }))
+end
+
 t.case("Free aim: under GBO 4, the Killzone ladder gets the target of the shot when it is a unit", function()
 	local ow = Overwatcher{}
 	ow.max_aim = 10
@@ -2699,18 +2829,37 @@ t.case("Free aim: under GBO 4, the Killzone ladder gets the target of the shot w
 	local targets = {}
 	Rat_KillzoneAim = FakeKillzoneAim({ [mover] = 3, [other] = 2 }, targets)
 	ApplyModOptions({ IOS = true, IOSFreeAim = "0" })
-	local other_min, weapon_min
+	local other_min
 	OverwatchTrigger(mover, ow, dummies, {
-		{ at = 100, run = function()
-			other_min = Unit.GetBaseAimLevelRange(ow, aim_action, other)
-			weapon_min = Unit.GetBaseAimLevelRange(ow, aim_action, { kinds = { Firearm = true } })
-		end },
+		{ at = 100, run = function() other_min = Unit.GetBaseAimLevelRange(ow, aim_action, other) end },
 		{ at = 300, run = PressEndTurn },
 	})
 	ApplyModOptions({})
 	Rat_KillzoneAim = nil
 	t.eq(other_min, 2)
-	t.eq(weapon_min, 3)
+end)
+
+t.case("Free aim: under GBO 4, the AP cost of a shot at the crosshair target gets the Killzone value of that target", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local other = FakeUnit({ id = "b", team = enemy_team })
+	local mover, _, dummies = WalkingMover(10)
+	Rat_KillzoneAim = FakeKillzoneAim({ [mover] = 3, [other] = 2 }, {})
+	ApplyModOptions({ IOS = true, IOSFreeAim = "0" })
+	local crosshair_min, no_crosshair_min
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			world.crosshair = { [ow] = other }
+			crosshair_min = CostAimMin(ow)
+			world.crosshair = nil
+			no_crosshair_min = CostAimMin(ow)
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	ApplyModOptions({})
+	Rat_KillzoneAim = nil
+	t.eq(crosshair_min, 2)
+	t.eq(no_crosshair_min, 3)
 end)
 
 -- Runs OverwatcherAimRange for an overwatcher with the Killzone perk and no GBO 4.

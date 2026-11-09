@@ -2,7 +2,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "InterruptSystem",
 		'DisplayName', "<color AmmoHPColor>Interrupt System (Experimental)</color>",
-		'Help', "IIS (the JA2 1.13 default): each merc counts the AP that a seen enemy spends. When the count reaches the merc's reaction time, the merc interrupts. JA2 Classic: when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins, a tie goes to the enemy, and an enemy that cannot see the merc always loses. Off: no IIS or JA2 Classic interrupts. The mod stays loaded, because saves turn it back on.",
+		'Help', "IIS (the JA2 1.13 default): each merc counts the AP that a seen enemy spends. When the count reaches the merc's reaction time, the merc interrupts. JA2 Classic: when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins, a tie goes to the enemy, and an enemy that cannot see the merc always loses. Off: no IIS or JA2 Classic interrupts. The mod stays loaded, because saves turn it back on. Under GBO 4, attacks cost more AP. Thus a merc counts more AP from an enemy attack, and a merc needs the GBO 4 cost of its attack to win an interrupt.",
 		'DefaultValue', "IIS",
 		'ChoiceList', {
 			"IIS",
@@ -13,13 +13,13 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "Collective",
 		'DisplayName', "<color AmmoHPColor>Collective interrupts (IIS)</color>",
-		'Help', "When a merc wins an interrupt, teammates within 5 tiles can join it. The chance comes from Leadership, levels, Agility and Wisdom.",
+		'Help', "When a merc wins an interrupt, teammates within 5 tiles can join it. The chance comes from Leadership, levels, Agility and Wisdom. GBO 4 does not change this option.",
 		'DefaultValue', true,
 	}),
 	PlaceObj('ModItemOptionChoice', {
 		'name', "AfterInterrupt",
 		'DisplayName', "<color AmmoHPColor>Interrupted enemy</color>",
-		'Help', "Stop (JA2 1.13): the enemy stays on the tile where it was interrupted, gets back the AP for the rest of its path and attacks from there. Continue: the enemy walks on to its destination.",
+		'Help', "Stop (JA2 1.13): the enemy stays on its tile when the interrupt ends. It gets back the AP for the rest of its path and attacks from there. Continue: the enemy walks on to its destination. This option applies only to IIS and JA2 Classic interrupts. GBO 4 does not change this option.",
 		'DefaultValue', "Stop",
 		'ChoiceList', {
 			"Stop",
@@ -29,7 +29,7 @@ return {
 	PlaceObj('ModItemOptionNumber', {
 		'name', "ReactionTime",
 		'DisplayName', "<color AmmoHPColor>IIS reaction time</color>",
-		'Help', "BASIC_REACTION_TIME_LENGTH of JA2 1.13. Lower values give more interrupts. Agility, AP left, wounds and fatigue change it for each merc. Default 25.",
+		'Help', "BASIC_REACTION_TIME_LENGTH of JA2 1.13. Lower values give more interrupts. Agility, AP left, wounds and fatigue change it for each merc. Default 25. GBO 4 does not change this option.",
 		'DefaultValue', 25,
 		'MinValue', 5,
 		'MaxValue', 60,
@@ -38,7 +38,7 @@ return {
 	PlaceObj('ModItemOptionNumber', {
 		'name', "BasicPercent",
 		'DisplayName', "<color AmmoHPColor>IIS AP registered (%)</color>",
-		'Help', "BASIC_PERCENTAGE_APS_REGISTERED of JA2 1.13: the percent of a seen enemy's AP that a merc counts, plus 4% per merc level, minus up to 25% for distance. Higher values give more interrupts. Default 60.",
+		'Help', "BASIC_PERCENTAGE_APS_REGISTERED of JA2 1.13: the percent of a seen enemy's AP that a merc counts. Each merc level adds 4%, and distance removes up to 25%. Higher values give more interrupts. Default 60. Under GBO 4, attacks cost more AP, so a merc counts more AP from an enemy attack.",
 		'DefaultValue', 60,
 		'MinValue', 30,
 		'MaxValue', 100,
@@ -59,7 +59,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "MovingTargetPenalty",
 		'DisplayName', "<color AmmoTracerColor>Moving target penalty</color>",
-		'Help', "A to-hit penalty for a merc's shot in an interrupt at the enemy whose action the interrupt paused. The penalty is the full value when the enemy moved 10 tiles or more across the line of fire in its current move, less for a shorter move or a move toward or away from the merc, and 0 when the enemy did not move. A reflex sight removes it. 0: no penalty. Under GBO 4 with aimed CTH, the penalty makes the aim cone wider, as other to-hit modifiers do.",
+		'Help', "A to-hit penalty for a merc's shot in an interrupt at the enemy whose action the interrupt paused. The penalty has the full value when the enemy moved 10 tiles or more across the line of fire in its current move. A shorter move, or a move toward or away from the merc, gives less. When the enemy did not move, the penalty is 0. A reflex sight removes it. 0: no penalty. Under GBO 4 with aimed CTH, the penalty makes the aim cone wider, as other to-hit modifiers do.",
 		'DefaultValue', "0",
 		'ChoiceList', {
 			"0",
@@ -72,13 +72,13 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "IOS",
 		'DisplayName', "<color AmmoMatchColor>Improved Overwatch System (IOS)</color>",
-		'Help', "On: when an enemy moves or attacks in the Overwatch cone of a merc, the enemy stops and the merc acts in an interrupt in place of the automatic Overwatch shot. The merc pays from the AP of its Overwatch attacks, and the AP that it does not spend stays for the next trigger. End Turn with no action costs nothing. The enemy then continues its action. Enemy Overwatch does not change. Under GBO 4, the pool uses the GBO 4 attack costs and Overwatch attack count.",
+		'Help', "On: when an enemy moves or attacks in the Overwatch cone of a merc, the enemy stops. The merc then acts in an interrupt in place of the automatic Overwatch shot. The merc pays from the AP of its Overwatch attacks, and the AP that it does not spend stays for the next trigger. End Turn with no action costs nothing. The enemy then continues its action. Enemy Overwatch does not change. Under GBO 4, the pool uses the GBO 4 attack costs and Overwatch attack count.",
 		'DefaultValue', false,
 	}),
 	PlaceObj('ModItemOptionChoice', {
 		'name', "IOSActions",
 		'DisplayName', "<color AmmoMatchColor>IOS actions</color>",
-		'Help', "What a merc can do in an IOS interrupt. Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action that its pool pays for. After the interrupt, Overwatch ends when the merc moved, changed stance or did an action that is not an attack or a reload, and the rest of the pool is lost. Otherwise Overwatch stays while the pool pays for one attack. Under GBO 4, an action that removes the Shooting Stance also ends Overwatch.",
+		'Help', "What a merc can do in an IOS interrupt. Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action that its pool pays for. After the interrupt, Overwatch ends when the merc moved, changed stance or did an action that is not an attack or a reload. The rest of the pool is then lost. Otherwise Overwatch stays while the pool pays for one attack. Under GBO 4, an action that removes the Shooting Stance also ends Overwatch.",
 		'DefaultValue', "Shot only",
 		'ChoiceList', {
 			"Shot only",
@@ -100,7 +100,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "IOSFreeAim",
 		'DisplayName', "<color AmmoMatchColor>IOS free aim levels</color>",
-		'Help', "The minimum aim level of a merc's shot in an IOS interrupt, as a prepared weapon gives. The levels up to the minimum cost no AP. The value is a total, not a bonus: a shot that already has a higher minimum keeps it. A merc with Killzone gets 1 free level, or the value of this option when it is higher. Under GBO 4, the Shooting Stance level counts toward the total, so the value 1 gives no extra level in the Shooting Stance, and Killzone gives the free levels of the GBO 4 Killzone ladder for each new target in the turn.",
+		'Help', "The minimum aim level of a merc's shot in an IOS interrupt, as a prepared weapon gives. The levels up to the minimum cost no AP. The value is a total, not a bonus: a shot that already has a higher minimum keeps it. A merc with Killzone gets 1 free level, or the value of this option when it is higher. Under GBO 4, the Shooting Stance level counts toward the total. Thus the value 1 gives no extra level in the Shooting Stance. Killzone gives the free levels of the GBO 4 Killzone ladder for each new target in the turn.",
 		'DefaultValue', "1",
 		'ChoiceList', {
 			"0",
@@ -117,7 +117,7 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "VerboseLog",
 		'DisplayName', "<color AmmoTracerColor>Verbose log</color>",
-		'Help', "Also write one log line for each merc in each interrupt check.",
+		'Help', "Also write one log line for each merc in each interrupt check. GBO 4 does not change this option.",
 		'DefaultValue', false,
 	}),
 	PlaceObj('ModItemCode', {

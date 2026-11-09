@@ -40,9 +40,9 @@ function IISControl.Setup(o)
 end
 
 -- The engine state that the last interrupt took and EndInterrupt gives back, the counters for its
--- END log line, and the handler's request. IISControl.Activate replaces them at the start of each
--- interrupt.
-local taken, counters, request
+-- END log line, the handler's request, and the IDs of the actions that each interrupter started.
+-- IISControl.Activate replaces them at the start of each interrupt.
+local taken, counters, request, started
 
 --- Returns the handler's request of the active interrupt, or nil when no interrupt is active.
 function IISControl.Request()
@@ -52,11 +52,13 @@ end
 --- Makes `it` the active interrupt and returns two new tables for it: the engine state that the
 -- takeover list takes, and the counters for the END log line.
 -- `dummy` is the step of the mover's path where the interrupt caught it, or nil. `req` is the
--- handler's request, or nil.
-function IISControl.Activate(it, dummy, req)
-	taken = { dummy = dummy, ap_before = {} }
+-- handler's request, or nil. `ap_before` holds the raw AP that each granted interrupter had before
+-- its grant, or is nil when no interrupter has a grant.
+function IISControl.Activate(it, dummy, req, ap_before)
+	taken = { dummy = dummy, ap_before = ap_before or {} }
 	counters = { start_time = GameTime(), start_ap = {}, forced = {} }
 	request = req or empty_table
+	started = {}
 	for _, m in ipairs(it:Interrupters()) do
 		counters.start_ap[m] = E.APRaw(m)
 	end
@@ -342,12 +344,15 @@ IISControl.HANDLED = "iis_handled"
 --   `banner`: optional, the banner shows "<banner>: <interrupter names>" in place of "INTERRUPT!"
 --   `ap_grants`: an optional raw AP for each interrupter. The interrupter's AP is the grant during
 --     the interrupt, and its old AP again after it.
---   `on_end(ap_left)`: optional, called at the end with the raw AP that each granted interrupter
---     had left
+--   `on_end(ap_left, started)`: optional, called at the end with the raw AP that each granted
+--     interrupter had left, and the list of the action IDs that each interrupter started, in
+--     order. A queued action that never started is not in the list.
 --   `action_limits`: an optional `limit(action_id, target)` for each interrupter. The interrupter
 --     can start an action only when its limit returns true.
 --   `aim_limit`: optional, the percent of its maximum aim level that each interrupter can use
 --     (Aim.lua)
+--   `free_aim(unit, action, target)`: optional, the number of aim levels that the minimum aim
+--     level of each interrupter's shot is at least. These levels cost no AP (Aim.lua).
 function IISControl.Handle(entry_type, handler)
 	handlers[entry_type] = handler
 end
@@ -385,8 +390,7 @@ local function Run(mover, req, n)
 	-- InterruptBegin sets 3% animation speed for the overwatch slow motion. Hit reactions on the
 	-- frozen enemy would then play 33 times slower.
 	mover:SetAnimSpeedModifier(1000)
-	local state = IISControl.Activate(it, req.dummy, req)
-	state.ap_before = ap_before
+	local state = IISControl.Activate(it, req.dummy, req, ap_before)
 	TakeEngine(it, state)
 	SafeCall(it, "UI.Begin", IIS.UI.Begin, it, req.banner)
 	SafeCall(it, "control log", function()
@@ -576,7 +580,7 @@ function IISControl.EndInterrupt(it, reason)
 		end
 	end
 	if request.on_end then
-		SafeCall(it, "on_end", request.on_end, ap_left)
+		SafeCall(it, "on_end", request.on_end, ap_left, started)
 	end
 end
 
@@ -647,6 +651,8 @@ function IIS.RunMercAction(it, action_id, unit, ap, ...)
 	local count = it:ActionStarted()
 	Log("INT #%d run action #%d %s merc=%s cost=%s ap_left=%s | %s", it:Number(), count, tostring(action_id), Name(unit),
 		IIS.FormatAP(ap), AP(unit), RunningStateSnapshot())
+	started[unit] = started[unit] or {}
+	table.insert(started[unit], action_id)
 	g_Combat:SetActiveUnit(unit)
 	RunCombatAction(action_id, unit, ap, ...)
 end

@@ -30,6 +30,7 @@ IIS.Config = {
 	ios_aim_limit = 100,         -- percent of the maximum aim levels that an overwatcher can use (Aim.lua)
 	interrupt_aim_limit = 100,   -- the same for a winner or a joiner of an IIS or JA2 Classic interrupt
 	ios_free_aim = 1,            -- the minimum aim level of an overwatcher's shot, at no AP cost (IOS.lua)
+	ios_full_aim = false,        -- GBO 4 old CTH: an overwatcher's shot gets the full aim bonus (IOS.lua)
 }
 
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
@@ -202,6 +203,11 @@ function E.AttackCostRaw(unit)
 		return action and action:GetAPCost(unit) or -1
 	end)
 	return ok and cost or -1
+end
+
+function E.Overwatch(unit)
+	local all = rawget(_G, "g_Overwatch")
+	return all and all[unit]
 end
 
 function E.Status(unit, id)
@@ -417,6 +423,7 @@ function IIS.WinSkipReason(w, system)
 	for _, id in ipairs(blocking_status) do
 		if E.Status(w, id) then return id end
 	end
+	if E.Overwatch(w) then return "on Overwatch" end
 	local ap = E.APRaw(w)
 	local min = R.MinAP(system, E.WalkRaw(), IIS.RulesConfig())
 	if ap < min then return "AP below minimum" end
@@ -1038,11 +1045,11 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s ios_free_aim=%s",
+	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s ios_free_aim=%s ios_full_aim=%s",
 		why, c.system, tostring(c.collective), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
 		tostring(c.moving_target_penalty),
 		tostring(c.log_checks), tostring(c.ios), c.ios_actions, tostring(c.ios_aim_limit), tostring(c.interrupt_aim_limit),
-		tostring(c.ios_free_aim))
+		tostring(c.ios_free_aim), tostring(c.ios_full_aim))
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks

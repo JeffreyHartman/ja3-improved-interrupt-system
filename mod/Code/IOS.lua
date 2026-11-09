@@ -10,21 +10,23 @@ local Log, Name, FormatAP = IIS.Log, IIS.Name, IIS.FormatAP
 -- The number of the last interrupt that IOS.InterruptRequest asked for.
 local ios_interrupt
 
-function E.Overwatch(unit)
-	local all = rawget(_G, "g_Overwatch")
-	return all and all[unit]
-end
-
 function E.CombatTurn()
 	return g_Combat and g_Combat.current_turn
 end
 
--- The same cone check as vanilla Unit:IsThreatened (UnitOverwatch.lua:1664).
+-- `target` must be a unit. With the mode "overwatch", Unit:IsThreatened is also true only when
+-- `unit` can see `target`.
 function E.InOverwatchCone(unit, target)
-	local overwatch = E.Overwatch(unit)
-	if not overwatch then return false end
-	local angle = overwatch.orient or CalcOrientation(overwatch.pos, overwatch.target_pos)
-	return CheckLOS(target, unit, overwatch.dist, overwatch.stance, overwatch.cone_angle, angle) and true or false
+	return target:IsThreatened({ unit }, "overwatch") and true or false
+end
+
+-- Returns the target of the crosshair that `unit` aims with, or nil when no crosshair of `unit`
+-- is open. Vanilla reads the crosshair target in the same way (IModeCombatAttackBase.lua:666).
+function E.CrosshairTarget(unit)
+	local dlg = GetInGameInterfaceModeDlg()
+	local crosshair = dlg and dlg.crosshair
+	local context = crosshair and crosshair.context
+	return context and context.attacker == unit and context.target or nil
 end
 
 function E.LogOverwatchReveal(mover)
@@ -47,28 +49,39 @@ local function InSightInCone(m, target)
 		and E.InOverwatchCone(m, target)
 end
 
--- Returns the action limit of overwatcher `m` for the "IOS actions" option. With "Any action", it
--- writes the first action that is not an attack or a reload to `ends[m]`.
-local function ActionLimit(m, ends)
+-- Returns the action limit of overwatcher `m` for the "IOS actions" option.
+local function ActionLimit(m)
 	if IIS.Config.ios_actions == "any" then
-		return function(action_id)
-			if action_id ~= "Reload" and not IsAttack(action_id) then
-				ends[m] = ends[m] or action_id
-			end
-			return true
-		end
+		return function() return true end
 	end
 	return function(action_id, target)
 		return action_id == "Reload" or IsAttack(action_id) and InSightInCone(m, target)
 	end
 end
 
+-- Returns the first action ID in `action_ids` that is not an attack or a reload, or nil.
+local function OverwatchEndingAction(action_ids)
+	for _, action_id in ipairs(action_ids or empty_table) do
+		if action_id ~= "Reload" and not IsAttack(action_id) then
+			return action_id
+		end
+	end
+end
+
 -- True while KillzoneAim runs, because Rat_KillzoneAim calls Unit:GetBaseAimLevelRange.
 local in_killzone_aim
 
+-- Returns the target unit of a shot of `m` for the Killzone ladder. Unit:GetAttackAPCost gives the
+-- weapon as the target, so the crosshair target stands in for it. Without a crosshair, the target
+-- is `mover`.
+local function KillzoneTarget(m, target, mover)
+	if IsKindOf(target, "Unit") then return target end
+	local aimed = E.CrosshairTarget(m)
+	return IsKindOf(aimed, "Unit") and aimed or mover
+end
+
 -- Returns the free aim levels of Killzone for the shot of `m` at `target`: the GBO 4 Killzone
--- ladder value when GBO 4 is loaded, otherwise 1. Unit:GetAttackAPCost gives the weapon as the
--- target, so a target that is not a unit counts as `mover`.
+-- ladder value when GBO 4 is loaded, otherwise 1.
 local function KillzoneAim(m, action, target, mover)
 	local gbo_aim = rawget(_G, "Rat_KillzoneAim")
 	if not gbo_aim then
@@ -76,7 +89,7 @@ local function KillzoneAim(m, action, target, mover)
 	end
 	if in_killzone_aim then return 0 end
 	in_killzone_aim = true
-	local ok, aim = pcall(gbo_aim, m, IsKindOf(target, "Unit") and target or mover, 0, action)
+	local ok, aim = pcall(gbo_aim, m, KillzoneTarget(m, target, mover), 0, action)
 	in_killzone_aim = false
 	if not ok then error(aim, 0) end
 	return aim or 0
@@ -147,7 +160,7 @@ end
 -- `triggered_by`, the mover loses Hidden, and the combat log names the mover.
 function IOS.InterruptRequest(mover, entry, n, entries)
 	local turn = E.CombatTurn()
-	local overwatchers, grants, notes, limits, ends = {}, {}, {}, {}, {}
+	local overwatchers, grants, notes, limits = {}, {}, {}, {}
 	for _, e in ipairs(entries or { entry }) do
 		local m = e[2]
 		local overwatch = E.CanControlTeam(m) and E.Overwatch(m)
@@ -157,7 +170,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 			if cost > 0 and pool >= cost then
 				overwatchers[#overwatchers + 1] = m
 				grants[m] = pool
-				limits[m] = ActionLimit(m, ends)
+				limits[m] = ActionLimit(m)
 				notes[m] = string.format(" (overwatcher, pool %s, attack cost %s)", FormatAP(pool), FormatAP(cost))
 			else
 				Log("IOS: overwatcher %s cannot pay for an attack (pool %s, cost %s), vanilla handles it", Name(m),
@@ -188,9 +201,10 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 		end,
 		ap_grants = grants,
 		action_limits = limits,
-		on_end = function(ap_left)
+		on_end = function(ap_left, started)
 			for _, m in ipairs(overwatchers) do
-				IIS.SafeCall(nil, "IOS end of " .. Name(m), FinishOverwatcher, m, ap_left[m] or 0, n, ends[m])
+				IIS.SafeCall(nil, "IOS end of " .. Name(m), FinishOverwatcher, m, ap_left[m] or 0, n,
+					OverwatchEndingAction(started[m]))
 			end
 		end,
 	}
@@ -203,16 +217,23 @@ function IOS.IsOverwatcher(unit)
 	return it and it:Number() == ios_interrupt and it:IsInterrupter(unit) or false
 end
 
--- The crosshair's to-hit preview and Unit:FirearmAttack both get their attack args from here. The
--- vanilla Overwatch shot is always a firearm attack, so other attacks stay as they are.
-local orig_PrepareAttackArgs = Unit.PrepareAttackArgs
-function Unit:PrepareAttackArgs(action_id, args)
-	local attack_args = orig_PrepareAttackArgs(self, action_id, args)
-	if IsKindOf(attack_args.weapon, "Firearm") and IOS.IsOverwatcher(self) then
-		attack_args.opportunity_attack = true
-		attack_args.opportunity_attack_type = "Overwatch"
+--- Wraps Unit:PrepareAttackArgs, unless the wrap is already in place. The wrap makes the firearm
+-- attack of an overwatcher an Overwatch opportunity attack.
+-- The crosshair's to-hit preview and Unit:FirearmAttack both get their attack args from
+-- Unit:PrepareAttackArgs. The vanilla Overwatch shot is always a firearm attack, so other attacks
+-- stay as they are.
+function IOS.HookAttackArgs()
+	if Unit.PrepareAttackArgs == IOS.attack_args_hook then return end
+	local orig = Unit.PrepareAttackArgs
+	IOS.attack_args_hook = function(self, action_id, args, ...)
+		local attack_args = orig(self, action_id, args, ...)
+		if IsKindOf(attack_args.weapon, "Firearm") and IOS.IsOverwatcher(self) then
+			attack_args.opportunity_attack = true
+			attack_args.opportunity_attack_type = "Overwatch"
+		end
+		return attack_args
 	end
-	return attack_args
+	Unit.PrepareAttackArgs = IOS.attack_args_hook
 end
 
 local full_aim_wrappers = setmetatable({}, { __mode = "k" })
@@ -249,7 +270,10 @@ function OnMsg.DataLoaded()
 	WrapGBO4Aim()
 end
 
+-- GBO 4 wraps Unit:PrepareAttackArgs when its code loads, which can be after this mod.
 function OnMsg.ModsReloaded()
+	IIS.SafeCall(nil, "attack args hook", IOS.HookAttackArgs)
+	Log("attack args hook: %s", Unit.PrepareAttackArgs == IOS.attack_args_hook and "ours" or "REPLACED")
 	IOS.Install()
 end
 
