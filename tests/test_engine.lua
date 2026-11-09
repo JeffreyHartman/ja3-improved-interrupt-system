@@ -1,4 +1,4 @@
--- Tests for the game-side logic in mod/Code/IIS.lua and mod/Code/Control.lua. They load the
+-- Tests for the game-side logic in mod/Code/IIS.lua, Control.lua and IOS.lua. They load the
 -- real files with fake engine globals, then replace IIS.E (the engine reads) with fakes. They
 -- use the real IISMemory and IISInterrupt modules.
 -- They do not cover UI.lua or anything that needs a running game.
@@ -186,6 +186,7 @@ OnMsg = setmetatable({}, {
 
 dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
+dofile("mod/Code/IOS.lua")
 -- The game sends ModsReloaded after it runs the code files.
 OnMsg.ModsReloaded()
 
@@ -234,10 +235,10 @@ local function FakeUnit(o)
 	function u:ConsumeAP(n) self.ActionPoints = self.ActionPoints - (n or 0) end
 	function u:RemoveStatusEffect(id)
 		if id == "FreeMove" and self.statuses.FreeMove then
-			self.statuses.FreeMove = nil
 			self:ConsumeAP(self.free_move_ap)
 			self.free_move_ap = 0
 		end
+		self.statuses[id] = nil
 	end
 	function u:IsIdleCommand() return self.command == "Idle" end
 	function u:SetCommand(cmd) self.command = cmd end
@@ -1650,4 +1651,232 @@ t.case("An action limit stops an action that the check refuses, and allows an ac
 	t.eq(ran_actions[1][1], "Attack")
 	t.eq(ow.ActionPoints, 6000)
 	t.eq(#vanilla_started, 0)
+end)
+
+------------------------------------------------------------------------------------------------
+-- IOS through the provoke-list wrapper
+
+g_Overwatch = {}
+local reveal_logs = {}
+E.LogOverwatchReveal = function(mover) reveal_logs[#reveal_logs + 1] = mover end
+
+local function SetIOS(on)
+	ApplyModOptions({ IOS = on })
+end
+
+-- A merc on Overwatch with 0 AP and `attacks` Overwatch attacks. Its default attack costs `cost`
+-- raw AP. Like vanilla, GainAP does nothing while it is on Overwatch that is not permanent.
+local function Overwatcher(o)
+	local u = FakeUnit({ id = o.id or "ow", ap = 0, attack_cost = o.cost or 4000, team = o.team })
+	g_Overwatch[u] = { num_attacks = o.attacks or 2, triggered_by = {}, permanent = o.permanent }
+	function u:InterruptPreparedAttack() g_Overwatch[self] = nil end
+	function u:UpdateOverwatchVisual() end
+	local gain = u.GainAP
+	function u:GainAP(n)
+		if g_Overwatch[self] and not g_Overwatch[self].permanent then return end
+		gain(self, n)
+	end
+	return u
+end
+
+-- Gives the WalkingMover's provoke list an "overwatch" entry of `ow` on step 4, and returns the list.
+local function OverwatchTrigger(mover, ow, dummies, script)
+	FakeControl(script)
+	local list = { { "overwatch", ow, { target = mover }, dummies[4] } }
+	Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	game_time = 0
+	return list
+end
+
+local function Shoot(ow, mover, cost)
+	return function() StartCombatAction("Attack", ow, cost, { target = mover }) end
+end
+
+t.case("IOS: an overwatch entry of a merc starts an IOS interrupt with the merc as overwatcher, and vanilla fires no shot", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOS(true)
+	local n = IISControl.InterruptCount() + 1
+	local list = OverwatchTrigger(mover, ow, dummies, { { at = 300, run = PressEndTurn } })
+	t.eq(LogHas("INT #" .. n .. " BEGIN IOS overwatch: mover=enemy#enemy"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: ow#ow"), true)
+	t.eq(#vanilla_attacks, 0)
+	t.eq(list[1][1], IISControl.HANDLED)
+	t.eq(table.find(mover.passed_interrupts, 2, ow) ~= nil, true)
+end)
+
+t.case("IOS: the overwatcher's AP in the interrupt is the attack count multiplied by the default attack cost", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 2500 }
+	SetIOS(true)
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() during = ow.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(during, 7500)
+	t.eq(ow.ActionPoints, 0)
+end)
+
+t.case("IOS: the handler adds the mover to triggered_by, removes its Hidden status and writes the combat log line", function()
+	local mover, _, dummies = WalkingMover(10)
+	mover.statuses.Hidden = true
+	local ow = Overwatcher{}
+	SetIOS(true)
+	reveal_logs = {}
+	OverwatchTrigger(mover, ow, dummies, { { at = 300, run = PressEndTurn } })
+	t.eq(g_Overwatch[ow].triggered_by[mover.handle], true)
+	t.eq(mover.statuses.Hidden, nil)
+	t.eq(#reveal_logs, 1)
+	t.eq(reveal_logs[1], mover)
+end)
+
+t.case("IOS: after a shot and End Turn, the AP that is left is the pool of the next trigger, and the attack count is the pool divided by the attack cost", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 3000 }
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 4000) }, { at = 300, run = PressEndTurn } })
+	t.eq(ow.ActionPoints, 0)
+	t.eq(g_Overwatch[ow].num_attacks, 1)
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() during = ow.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(during, 5000)
+end)
+
+t.case("IOS: Overwatch ends when the pool cannot pay for one attack", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 3000 }
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 4000) }, { at = 300, run = PressEndTurn } })
+	t.eq(g_Overwatch[ow], nil)
+	t.eq(ow.ActionPoints, 0)
+end)
+
+t.case("IOS: a set-up machine gun stays on Overwatch with 0 attacks when its pool cannot pay for one attack", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 1, cost = 3000, permanent = true }
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 3000) }, { at = 300, run = PressEndTurn } })
+	t.eq(g_Overwatch[ow] ~= nil, true)
+	t.eq(g_Overwatch[ow].num_attacks, 0)
+end)
+
+t.case("IOS: a pass costs nothing, and Overwatch stays with all its attacks", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 4000 }
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 300, run = PressEndTurn } })
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+	t.eq(ow.ActionPoints, 0)
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() during = ow.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(during, 8000)
+end)
+
+t.case("IOS: the mover continues after the interrupt with \"Interrupted enemy = Stop\"", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOS(true)
+	Q.Config.after_interrupt = "stop"
+	OverwatchTrigger(mover, ow, dummies, { { at = 300, run = PressEndTurn } })
+	t.eq(IISControl.IsStopped(mover), false)
+	t.eq(#mover.combat_path, 3)
+	t.eq(LogHas("stops at"), false)
+end)
+
+t.case("IOS: with IOS off, vanilla gets the overwatch entry of a merc unchanged", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOS(false)
+	local count = IISControl.InterruptCount()
+	local list = OverwatchTrigger(mover, ow, dummies)
+	t.eq(list[1][1], "overwatch")
+	t.eq(list[1][2], ow)
+	t.eq(#vanilla_attacks, 1)
+	t.eq(vanilla_attacks[1], ow)
+	t.eq(IISControl.InterruptCount(), count)
+end)
+
+t.case("IOS: vanilla gets the overwatch entry of an enemy overwatcher unchanged", function()
+	local mover, _, dummies = WalkingMover(10)
+	local foe = Overwatcher{ id = "foe", team = enemy_team }
+	SetIOS(true)
+	local count = IISControl.InterruptCount()
+	local list = OverwatchTrigger(mover, foe, dummies)
+	t.eq(list[1][1], "overwatch")
+	t.eq(#vanilla_attacks, 1)
+	t.eq(vanilla_attacks[1], foe)
+	t.eq(IISControl.InterruptCount(), count)
+end)
+
+t.case("IOS: an Overwatch state without a pool, as from an old save, gets a pool from its attack count", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 1, cost = 5000 }
+	g_Overwatch[ow] = { num_attacks = 4, triggered_by = {}, expiration_turn = 2 }
+	SetIOS(true)
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() during = ow.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	t.eq(during, 20000)
+end)
+
+t.case("IOS: after the game counts the attacks of a set-up machine gun again at its turn start, the pool comes from the new count", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 3000, permanent = true }
+	g_Combat.current_turn = 1
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 4000) }, { at = 300, run = PressEndTurn } })
+	t.eq(g_Overwatch[ow].num_attacks, 0)
+	g_Combat.current_turn = 2
+	g_Overwatch[ow].num_attacks = 3
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() during = ow.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	g_Combat.current_turn = nil
+	t.eq(during, 9000)
+end)
+
+t.case("IOS: the AP of a queued action that never started goes back to the pool", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 2, cost = 4000 }
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			CombatActions_RunningState[ow] = "start"
+			StartCombatAction("Attack", ow, 4000, { target = mover })
+		end },
+		{ at = 200, run = function() CombatActions_RunningState[ow] = nil end },
+		{ at = 300, run = PressEndTurn },
+		{ at = 400, run = PressEndTurn },
+	})
+	t.eq(LogHas("dropped queued action Attack of ow#ow, refunded 4000 raw AP"), true)
+	t.eq(g_Overwatch[ow].num_attacks, 2)
+	t.eq(ow.ActionPoints, 0)
+end)
+
+t.case("IOS: an error in the handler is logged, and the enemy action continues with the vanilla shot", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOS(true)
+	local orig = E.LogOverwatchReveal
+	E.LogOverwatchReveal = function() error("reveal boom") end
+	local count = IISControl.InterruptCount()
+	local ok = pcall(OverwatchTrigger, mover, ow, dummies)
+	E.LogOverwatchReveal = orig
+	t.eq(ok, true)
+	t.eq(LogHas("overwatch handler failed: .*reveal boom"), true)
+	t.eq(IISControl.InterruptCount(), count)
+	t.eq(#vanilla_provoked, 1)
+	t.eq(#vanilla_attacks, 1)
+	SetIOS(false)
 end)

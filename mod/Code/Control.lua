@@ -334,6 +334,7 @@ IISControl.HANDLED = "iis_handled"
 --   `stop`: true to stop the mover at `dummy` when the interrupt ends
 --   `label`, `where`: the text of the BEGIN log line before and after the mover's state
 --   `notes`: an optional text for each interrupter, at the end of its interrupter log line
+--   `banner`: optional, the banner shows "<banner>: <interrupter names>" in place of "INTERRUPT!"
 --   `ap_grants`: an optional raw AP for each interrupter. The interrupter's AP is the grant during
 --     the interrupt, and its old AP again after it.
 --   `on_end(ap_left)`: optional, called at the end with the raw AP that each granted interrupter
@@ -380,7 +381,7 @@ local function Run(mover, req, n)
 	local state = IISControl.Activate(it, req.dummy, req)
 	state.ap_before = ap_before
 	TakeEngine(it, state)
-	SafeCall(it, "UI.Begin", IIS.UI.Begin, it)
+	SafeCall(it, "UI.Begin", IIS.UI.Begin, it, req.banner)
 	SafeCall(it, "control log", function()
 		Log("INT #%d control given: %s", n, UIState(it))
 	end)
@@ -417,7 +418,7 @@ local function Run(mover, req, n)
 	end
 end
 
-local function Start(mover, entries, handler)
+local function Start(mover, entries, entry_type, handler)
 	if not can_yield() then
 		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
 		return
@@ -431,8 +432,8 @@ local function Start(mover, entries, handler)
 		return
 	end
 	local n = interrupt_count + 1
-	local req = handler(mover, entries[1], n, entries)
-	if not req then return end
+	local ok, req = SafeCall(nil, entry_type .. " handler", handler, mover, entries[1], n, entries)
+	if not ok or not req then return end
 	for _, entry in ipairs(entries) do
 		if table.find(req.interrupters, entry[2]) then
 			entry[1] = IISControl.HANDLED
@@ -478,7 +479,7 @@ function Unit:ProvokeOpportunityAttacksFromList(list, ...)
 	local groups = HandledGroups(list)
 	local ours = #groups > 0
 	for _, group in ipairs(groups) do
-		Start(self, group, handlers[group.type])
+		Start(self, group, group.type, handlers[group.type])
 	end
 	-- Vanilla ignores the "iis" and HANDLED entry types, adds them to passed_interrupts and ends the
 	-- interrupt.
@@ -522,12 +523,17 @@ function IISControl.EndInterrupt(it, reason)
 	active = false
 	local n, counters = it:Number(), counters
 
-	-- Queued actions that never started already paid their AP.
+	-- Queued actions that never started already paid their AP. A granted interrupter can be on
+	-- Overwatch, where GainAP does nothing.
 	for _, e in ipairs(it:Drain()) do
 		SafeCall(it, "refund", function()
 			local action_id, unit, ap = e.action_id, e.unit, e.ap
 			if IsValid(unit) and (ap or 0) > 0 then
-				unit:GainAP(ap)
+				if taken.ap_before[unit] then
+					SetAP(unit, E.APRaw(unit) + ap)
+				else
+					unit:GainAP(ap)
+				end
 			end
 			Log("INT #%d dropped queued action %s of %s, refunded %s raw AP", n, tostring(action_id), Name(unit), tostring(ap))
 		end)

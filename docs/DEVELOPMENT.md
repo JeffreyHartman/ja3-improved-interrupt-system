@@ -9,17 +9,18 @@
 | `mod/Code/Interrupt.lua` | The interrupters, the action queue of the interrupters, activity, the stuck timer, the End Turn presses and the end decision of the active interrupt. It makes no engine calls. |
 | `mod/Code/IIS.lua` | Settings, log, trigger checks and the handler for `"iis"` entries. `IIS.E` holds every engine read, so the tests can replace it. |
 | `mod/Code/Control.lua` | `IISControl`: the provoke-list wrapper, Free Move removal, the interrupt run, the end of the interrupt and the Stop. It gives control to the interrupters. |
+| `mod/Code/IOS.lua` | `IOS`: the handler for `"overwatch"` entries and the AP pool of each overwatcher. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
 | `mod/Code/MovingTarget.lua` | The "Moving target" to-hit modifier for a shot by an interrupter at the mover. |
 
-`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `UI.lua`, `MovingTarget.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
+`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `IOS.lua`, `UI.lua`, `MovingTarget.lua`. `IOS.lua` adds its engine reads to `IIS.E` and calls `IISControl.Handle`, so it loads after `Control.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
 
 The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"` entry to the vanilla interrupt list. It returns nothing for a mover that the Stop stopped. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
 
 The wrapper of `Unit:ProvokeOpportunityAttacksFromList` in `Control.lua` keeps a handler for each entry type. `IISControl.Handle(entry_type, handler)` registers one. The wrapper puts the entries that have a handler in groups. A group holds all entries of one type on one step (`entry[4]`). The `"overwatch"` groups go first, then the `"iis"` groups, then the other types. The list order does not change this order. For each group:
 
 1. `IISControl` checks that the thread can yield, that no interrupt is active, and that the mover is valid and alive. If a check fails, it logs the skip reason and does not call the handler.
-2. `IISControl` calls the handler with the mover, the first entry of the group, the next interrupt number and the list of all entries of the group.
+2. `IISControl` calls the handler with the mover, the first entry of the group, the next interrupt number and the list of all entries of the group. An error in the handler is logged, no interrupt starts, and vanilla gets the entries of the group unchanged.
 3. The handler returns nothing, or a request. If it returns nothing, no interrupt starts and the interrupt number does not change.
 4. A request gives the interrupters (the top interrupter first), the stop step, the Stop decision, the text of the `BEGIN` log line and an optional note for each interrupter.
 5. The handler takes each entry of the group whose unit (`entry[2]`) is an interrupter. The wrapper changes the type of a taken entry to `IISControl.HANDLED` (`"iis_handled"`).
@@ -29,11 +30,21 @@ A request can also have these fields for each interrupter:
 
 | Field | What it does |
 |---|---|
-| `ap_grants[unit]` | A raw AP value. At the start, `IISControl` sets the interrupter's AP to the grant. At the end, it puts back the AP that the interrupter had before the grant. It writes `ActionPoints` directly, because `Unit:GainAP` does nothing for a unit on Overwatch. |
+| `ap_grants[unit]` | A raw AP value. At the start, `IISControl` sets the interrupter's AP to the grant. At the end, it puts back the AP that the interrupter had before the grant. It writes `ActionPoints` directly, because `Unit:GainAP` does nothing for a unit on Overwatch. The AP of a queued action that did not start goes back to the grant in the same way. |
 | `on_end(ap_left)` | A function. At the end, `IISControl` calls it with the raw AP that each granted interrupter had left. |
+| `banner` | A text. The banner shows "`banner`: interrupter names" in place of "INTERRUPT!". |
 | `action_limits[unit]` | A function `limit(action_id, target)`. The `StartCombatAction` override calls it before it takes the AP. When the limit does not return true, or fails, the action does not start and costs no AP. |
 
 The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter in `IIS.lua`. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move.
+
+The handler for `"overwatch"` entries is `IOS.InterruptRequest` in `IOS.lua`. `IOS.Install` registers it when the IOS option is on, on `ModsReloaded` and when the options change. When the option is off, no handler is registered, and vanilla gets each `"overwatch"` entry unchanged. The handler:
+
+- takes each entry of a merc (a unit of a UI-controlled team) on Overwatch whose pool can pay for one default attack. An entry of an enemy overwatcher goes to vanilla unchanged;
+- does the bookkeeping of `Unit:ProvokeOpportunityAttack_Overwatch` without calling it: it adds the mover to the overwatcher's `triggered_by`, removes Hidden from the mover and writes the vanilla combat log line;
+- sends a request with each overwatcher's pool as its AP grant, `stop = false` and the banner "Overwatch". The "Interrupted enemy" option does not apply;
+- in `on_end`, stores the AP that each overwatcher has left as its new pool, and sets `num_attacks` to the pool divided by the cost of one default attack, rounded down. The Overwatch marker and RatoAI read `num_attacks`. When the pool cannot pay for one attack, it ends Overwatch with `Unit:InterruptPreparedAttack`. A permanent Overwatch (a set-up machine gun) stays at 0 attacks, as in vanilla.
+
+The pool is in the Overwatch state, `g_Overwatch[unit]`, which the game saves. `ios_pool` is the raw AP, and `ios_count` and `ios_turn` are the attack count and the combat turn when IOS stored it. When the game changed the attack count or the turn since then, or when the state has no pool (a save from before IOS), the pool is `num_attacks` multiplied by the cost of one default attack. Thus a set-up machine gun gets its pool from the attack count that the game calculates again at each turn start. The handler gets each cost from `E.AttackCostRaw`, a live game call.
 
 When the interrupt starts, `IISControl` takes engine state from the game, and it gives the state back when the interrupt ends. The takeover list in `Control.lua` holds each take together with its give-back: the mover destructor, the visibility override, the camera locks, the AI camera fields and the player control. The start runs the list from the top, and the end runs it from the bottom. An error in one give-back is logged, and the other give-backs still run. The selection and the interface mode are taken but not given back. The counters for the `END` log line are in a separate table.
 
@@ -82,10 +93,10 @@ Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
 - `tests/test_rules.lua` checks the formulas against worked examples from the 1.13 source code.
 - `tests/test_memory.lua` checks `IISMemory` with a plain store table.
 - `tests/test_interrupt.lua` checks `IISInterrupt` with a fake clock and plain units.
-- `tests/test_engine.lua` loads `IIS.lua` and `Control.lua` with fake engine functions and the real `IISMemory` and `IISInterrupt`.
+- `tests/test_engine.lua` loads `IIS.lua`, `Control.lua` and `IOS.lua` with fake engine functions and the real `IISMemory` and `IISInterrupt`.
   Its option tests give the options to `IIS.lua` as the game does, and they read `mod/items.lua` and `mod/metadata.lua`.
   Its full interrupt tests go through the provoke-list wrapper. The `sleep` that they give to `IISControl.Setup` advances the game time and runs scripted steps, such as an End Turn press.
-- `tests/test_ui.lua` loads `UI.lua` and checks the combat log text at the start and end of an interrupt.
+- `tests/test_ui.lua` loads `UI.lua` and checks the combat log text at the start and end of an interrupt, and the banner text of a request.
 - `tests/test_moving_target.lua` loads `MovingTarget.lua` and calls the `CalcValue` of its to-hit modifier with fake units and an active interrupt.
 
 The tests do not cover the rest of `UI.lua` or anything that needs the game.
@@ -102,14 +113,17 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 
 | Line | Meaning |
 |---|---|
-| `loaded`, `control loaded`, `UI loaded` | The game ran the code files. Each hook status must say `ours`. |
+| `loaded`, `control loaded`, `IOS loaded`, `UI loaded` | The game ran the code files. Each hook status must say `ours`. `IOS loaded` gives the IOS option. |
 | `mods loaded` | The title, id and version of each loaded mod. |
 | `check #N ... TRIGGER` | A check found winners, with their points (JA2 Classic) or count and reaction time (IIS). |
 | `trigger in an AI planning check` | The AI ran the same check to group its units. Nothing happens. |
 | `IIS register`, `IIS commit` | A seen enemy action or move added AP to the mercs' counters. |
 | `enemy attack exec begin`, `enemy attack exec end` | An enemy firearm attack started or ended. A `begin` without an `end` means that the enemy's command stopped inside the attack. |
 | `after-attack check` | The check after an enemy attack, with its result or the reason that it did not run. |
-| `INT #N BEGIN`, `INT #N END` | The interrupt started or ended. `END` gives the reason and the AP of each interrupter. |
+| `INT #N BEGIN`, `INT #N END` | The interrupt started or ended. `END` gives the reason and the AP of each interrupter. An IOS interrupt has the label `IOS overwatch`, and each overwatcher line gives its pool and attack cost. |
+| `INT #N overwatcher` | The pool and the attack count of an overwatcher after an IOS interrupt, or the reason that its Overwatch ended. |
+| `IOS: overwatcher ... cannot pay for an attack` | The pool of a merc on Overwatch is below the cost of one attack, so vanilla gets its entry. |
+| `INT #- <type> handler failed` | A provoke-list handler failed. Vanilla gets the entries of that group. |
 | `INT #N collective` | A collective interrupt roll, or the reason that a teammate did not roll. |
 | `INT #N run action`, `action ended` | An interrupter action started or ended. |
 | `INT #N waiting` | The state of a waiting interrupt. It is written when the state changes, and every 30 seconds. |

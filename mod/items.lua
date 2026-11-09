@@ -58,6 +58,12 @@ return {
 		},
 	}),
 	PlaceObj('ModItemOptionToggle', {
+		'name', "IOS",
+		'DisplayName', "<color AmmoMatchColor>Improved Overwatch System (IOS)</color>",
+		'Help', "On: when an enemy moves or attacks in the Overwatch cone of a merc, the enemy stops and the merc acts in an interrupt in place of the automatic Overwatch shot. The merc pays from the AP of its Overwatch attacks, and the AP that it does not spend stays for the next trigger. End Turn with no action costs nothing. The enemy then continues its action. Enemy Overwatch does not change. Under GBO 4, the pool uses the GBO 4 attack costs and Overwatch attack count.",
+		'DefaultValue', false,
+	}),
+	PlaceObj('ModItemOptionToggle', {
 		'name', "VerboseLog",
 		'DisplayName', "<color AmmoTracerColor>Verbose log</color>",
 		'Help', "Also write one log line for each merc in each interrupt check.",
@@ -74,6 +80,10 @@ return {
 	PlaceObj('ModItemCode', {
 		'name', "Control",
 		'CodeFileName', "Code/Control.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "IOS",
+		'CodeFileName', "Code/IOS.lua",
 	}),
 	PlaceObj('ModItemCode', {
 		'name', "UI",

@@ -14,6 +14,7 @@ return PlaceObj('ModDef', {
 		"Code/Interrupt.lua",
 		"Code/IIS.lua",
 		"Code/Control.lua",
+		"Code/IOS.lua",
 		"Code/UI.lua",
 		"Code/MovingTarget.lua",
 	},
@@ -24,6 +25,7 @@ return PlaceObj('ModDef', {
 		BasicPercent = 60,
 		MovingTargetPenalty = "0",
 		VerboseLog = false,
+		IOS = false,
 	},
 	'TagGameplay', true,
 })

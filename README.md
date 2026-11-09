@@ -11,6 +11,7 @@ A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the e
 - **Collective interrupts:** teammates near a winner can join the interrupt.
 - **Clear UI:** an INTERRUPT! banner shows at the top of the screen, and the other mercs' portraits are locked. End Turn ends the interrupt.
 - **Stop or continue:** the interrupted enemy stops on its tile and attacks from there, or it continues its move.
+- **Improved Overwatch System (IOS):** when an enemy moves or attacks in the Overwatch cone of a merc, the merc acts in an interrupt in place of the automatic Overwatch shot. The merc pays from the AP of its Overwatch attacks, and End Turn with no action costs nothing. IOS is a separate option, and it works with or without the 1.13 interrupts.
 
 The formulas follow the JA2 1.13 source code. `mod/Code/Rules.lua` names the 1.13 source line for each formula.
 
@@ -44,6 +45,7 @@ The options list shows each group of options in one color: one color for the Int
 | Interrupted enemy | Interrupt System | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
 | IIS reaction time | Interrupt System | 25 | Lower values give more interrupts. |
 | IIS AP registered (%) | Interrupt System | 60 | Higher values give more interrupts. |
+| Improved Overwatch System (IOS) | IOS | off | The Overwatch trigger of a merc starts an interrupt in place of the Overwatch shot. |
 | Verbose log | Both systems | off | Writes more detail to the game log. |
 
 A setting from version 0.7.3 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".

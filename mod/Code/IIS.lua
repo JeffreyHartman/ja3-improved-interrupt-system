@@ -25,6 +25,7 @@ IIS.Config = {
 	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
+	ios = false,                 -- IOS: the Overwatch trigger of a merc starts an interrupt (IOS.lua)
 }
 
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
@@ -53,6 +54,7 @@ local function ApplyOptions()
 	cfg.basic_pct = tonumber(o.BasicPercent) or 60
 	cfg.moving_target_penalty = tonumber(o.MovingTargetPenalty) or 0
 	cfg.log_checks = o.VerboseLog == true
+	cfg.ios = o.IOS == true
 end
 ApplyOptions()
 
@@ -1021,10 +1023,10 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s",
+	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s",
 		why, c.system, tostring(c.collective), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
 		tostring(c.moving_target_penalty),
-		tostring(c.log_checks))
+		tostring(c.log_checks), tostring(c.ios))
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks
