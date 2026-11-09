@@ -10,8 +10,9 @@
 | `mod/Code/IIS.lua` | Settings, log, trigger checks and the handler for `"iis"` entries. `IIS.E` holds every engine read, so the tests can replace it. |
 | `mod/Code/Control.lua` | `IISControl`: the provoke-list wrapper, Free Move removal, the interrupt run, the end of the interrupt and the Stop. It gives control to the interrupters. |
 | `mod/Code/UI.lua` | Banner, portrait marks, End Turn label, camera and sounds. |
+| `mod/Code/MovingTarget.lua` | The "Moving target" to-hit modifier for a shot by an interrupter at the mover. |
 
-`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `UI.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
+`mod/metadata.lua` lists the code files in load order: `Rules.lua`, `Memory.lua`, `Interrupt.lua`, `IIS.lua`, `Control.lua`, `UI.lua`, `MovingTarget.lua`. `Control.lua` reads `IIS.E` and the log functions of `IIS.lua` when it loads, so it loads after `IIS.lua`. `IIS.lua` calls `IISControl` only after the code files load. It registers its handler for `"iis"` entries on `ModsReloaded`, which the game sends after it runs the code files of all mods.
 
 The wrapper of `Unit:CheckProvokeOpportunityAttacks` in `IIS.lua` adds an `"iis"` entry to the vanilla interrupt list. It returns nothing for a mover that the Stop stopped. The game then calls `Unit:ProvokeOpportunityAttacksFromList` in the enemy's command thread, and the AI turn waits until the interrupt ends.
 
@@ -85,6 +86,7 @@ Run `tools/test.sh`. It needs `lua5.4` and `luac5.4`.
   Its option tests give the options to `IIS.lua` as the game does, and they read `mod/items.lua` and `mod/metadata.lua`.
   Its full interrupt tests go through the provoke-list wrapper. The `sleep` that they give to `IISControl.Setup` advances the game time and runs scripted steps, such as an End Turn press.
 - `tests/test_ui.lua` loads `UI.lua` and checks the combat log text at the start and end of an interrupt.
+- `tests/test_moving_target.lua` loads `MovingTarget.lua` and calls the `CalcValue` of its to-hit modifier with fake units and an active interrupt.
 
 The tests do not cover the rest of `UI.lua` or anything that needs the game.
 

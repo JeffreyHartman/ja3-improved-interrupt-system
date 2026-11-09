@@ -6,6 +6,10 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 
 ## 0.7.4 (build 11), not released
 
+### Added
+
+- A "Moving target penalty" option. It gives a to-hit penalty for a merc's shot in an interrupt at the enemy that the interrupt paused, by the design of the vanilla Evasive Movement modifier. The default 0 gives no penalty (#35).
+
 ### Changed
 
 - The "Interrupt System (Experimental)" option has the values IIS, JA2 Classic and Off. It replaces the "JA2 1.13 interrupts (Experimental)" and "Interrupt system" options. "Classic" is now "JA2 Classic". Old settings become the new settings (#28).

@@ -44,6 +44,19 @@ return {
 		'MaxValue', 100,
 		'StepSize', 10,
 	}),
+	PlaceObj('ModItemOptionChoice', {
+		'name', "MovingTargetPenalty",
+		'DisplayName', "<color AmmoTracerColor>Moving target penalty</color>",
+		'Help', "A to-hit penalty for a merc's shot in an interrupt at the enemy whose action the interrupt paused. The penalty is the full value when the enemy moved 10 tiles or more across the line of fire in its current move, less for a shorter move or a move toward or away from the merc, and 0 when the enemy did not move. A reflex sight removes it. 0: no penalty. Under GBO 4 with aimed CTH, the penalty makes the aim cone wider, as other to-hit modifiers do.",
+		'DefaultValue', "0",
+		'ChoiceList', {
+			"0",
+			"10",
+			"15",
+			"25",
+			"35",
+		},
+	}),
 	PlaceObj('ModItemOptionToggle', {
 		'name', "VerboseLog",
 		'DisplayName', "<color AmmoTracerColor>Verbose log</color>",
@@ -65,5 +78,9 @@ return {
 	PlaceObj('ModItemCode', {
 		'name', "UI",
 		'CodeFileName', "Code/UI.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "MovingTarget",
+		'CodeFileName', "Code/MovingTarget.lua",
 	}),
 }
