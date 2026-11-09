@@ -22,6 +22,15 @@ function E.InOverwatchCone(unit, target)
 	return CheckLOS(target, unit, overwatch.dist, overwatch.stance, overwatch.cone_angle, angle) and true or false
 end
 
+-- Returns the target of the crosshair that `unit` aims with, or nil when no crosshair of `unit`
+-- is open. Vanilla reads the crosshair target in the same way (IModeCombatAttackBase.lua:666).
+function E.CrosshairTarget(unit)
+	local dlg = GetInGameInterfaceModeDlg()
+	local crosshair = dlg and dlg.crosshair
+	local context = crosshair and crosshair.context
+	return context and context.attacker == unit and context.target or nil
+end
+
 function E.LogOverwatchReveal(mover)
 	CombatLog("short", T{353305209140, "<LogName> was revealed by enemy overwatch", mover})
 end
@@ -64,9 +73,17 @@ end
 -- True while KillzoneAim runs, because Rat_KillzoneAim calls Unit:GetBaseAimLevelRange.
 local in_killzone_aim
 
+-- Returns the target unit of a shot of `m` for the Killzone ladder. Unit:GetAttackAPCost gives the
+-- weapon as the target, so the crosshair target stands in for it. Without a crosshair, the target
+-- is `mover`.
+local function KillzoneTarget(m, target, mover)
+	if IsKindOf(target, "Unit") then return target end
+	local aimed = E.CrosshairTarget(m)
+	return IsKindOf(aimed, "Unit") and aimed or mover
+end
+
 -- Returns the free aim levels of Killzone for the shot of `m` at `target`: the GBO 4 Killzone
--- ladder value when GBO 4 is loaded, otherwise 1. Unit:GetAttackAPCost gives the weapon as the
--- target, so a target that is not a unit counts as `mover`.
+-- ladder value when GBO 4 is loaded, otherwise 1.
 local function KillzoneAim(m, action, target, mover)
 	local gbo_aim = rawget(_G, "Rat_KillzoneAim")
 	if not gbo_aim then
@@ -74,7 +91,7 @@ local function KillzoneAim(m, action, target, mover)
 	end
 	if in_killzone_aim then return 0 end
 	in_killzone_aim = true
-	local ok, aim = pcall(gbo_aim, m, IsKindOf(target, "Unit") and target or mover, 0, action)
+	local ok, aim = pcall(gbo_aim, m, KillzoneTarget(m, target, mover), 0, action)
 	in_killzone_aim = false
 	if not ok then error(aim, 0) end
 	return aim or 0

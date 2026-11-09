@@ -1700,6 +1700,7 @@ local reveal_logs = {}
 E.LogOverwatchReveal = function(mover) reveal_logs[#reveal_logs + 1] = mover end
 
 E.InOverwatchCone = function(u, target) return world.cone[u] and world.cone[u][target] or false end
+E.CrosshairTarget = function(u) return world.crosshair and world.crosshair[u] end
 
 local function SetIOS(on, actions)
 	ApplyModOptions({ IOS = on, IOSActions = actions })
@@ -2736,6 +2737,11 @@ t.case("Free aim: under GBO 4, the option value applies when it is higher than t
 	t.eq(KillzoneAimRange(ow, 1, { IOSFreeAim = "2" }), 2)
 end)
 
+-- Like Unit:GetAttackAPCost, it asks for the aim range with the weapon as the target.
+local function CostAimMin(u)
+	return (Unit.GetBaseAimLevelRange(u, aim_action, { kinds = { Firearm = true } }))
+end
+
 t.case("Free aim: under GBO 4, the Killzone ladder gets the target of the shot when it is a unit", function()
 	local ow = Overwatcher{}
 	ow.max_aim = 10
@@ -2744,18 +2750,37 @@ t.case("Free aim: under GBO 4, the Killzone ladder gets the target of the shot w
 	local targets = {}
 	Rat_KillzoneAim = FakeKillzoneAim({ [mover] = 3, [other] = 2 }, targets)
 	ApplyModOptions({ IOS = true, IOSFreeAim = "0" })
-	local other_min, weapon_min
+	local other_min
 	OverwatchTrigger(mover, ow, dummies, {
-		{ at = 100, run = function()
-			other_min = Unit.GetBaseAimLevelRange(ow, aim_action, other)
-			weapon_min = Unit.GetBaseAimLevelRange(ow, aim_action, { kinds = { Firearm = true } })
-		end },
+		{ at = 100, run = function() other_min = Unit.GetBaseAimLevelRange(ow, aim_action, other) end },
 		{ at = 300, run = PressEndTurn },
 	})
 	ApplyModOptions({})
 	Rat_KillzoneAim = nil
 	t.eq(other_min, 2)
-	t.eq(weapon_min, 3)
+end)
+
+t.case("Free aim: under GBO 4, the AP cost of a shot at the crosshair target gets the Killzone value of that target", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local other = FakeUnit({ id = "b", team = enemy_team })
+	local mover, _, dummies = WalkingMover(10)
+	Rat_KillzoneAim = FakeKillzoneAim({ [mover] = 3, [other] = 2 }, {})
+	ApplyModOptions({ IOS = true, IOSFreeAim = "0" })
+	local crosshair_min, no_crosshair_min
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			world.crosshair = { [ow] = other }
+			crosshair_min = CostAimMin(ow)
+			world.crosshair = nil
+			no_crosshair_min = CostAimMin(ow)
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	ApplyModOptions({})
+	Rat_KillzoneAim = nil
+	t.eq(crosshair_min, 2)
+	t.eq(no_crosshair_min, 3)
 end)
 
 -- Runs OverwatcherAimRange for an overwatcher with the Killzone perk and no GBO 4.
