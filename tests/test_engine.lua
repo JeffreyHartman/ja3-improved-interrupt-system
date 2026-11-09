@@ -2128,6 +2128,110 @@ t.case("IIS: the to-hit preview and the attack args of a winner's shot are not a
 	t.eq(fired[1].opportunity_attack_type, nil)
 end)
 
+------------------------------------------------------------------------------------------------
+-- "IOS full aim under GBO 4"
+
+-- Like the GBO 4 Aim modifier in old CTH mode (Code/CTH_aim.lua), an opportunity attack gets
+-- half of the aim bonus. Each aim level gives 10.
+local function FakeGBO4OldCTH()
+	aim_cth = function() end
+	Presets = { ChanceToHitModifier = { Default = { Aim = {
+		CalcValue = function(self, attacker, target, body_part_def, action, weapon1, weapon2, lof, aim,
+			opportunity_attack)
+			local bonus = aim * 10
+			if opportunity_attack then
+				bonus = bonus // 2
+			end
+			return aim > 0, bonus
+		end,
+	} } } }
+	OnMsg.DataLoaded()
+end
+
+-- Like Unit:CalcChanceToHit, the to-hit of `unit` is the value of the Aim modifier for the attack args.
+local function AimedArmed(unit)
+	Armed(unit)
+	function unit:CalcChanceToHit(target, action, args)
+		self.cth_args[#self.cth_args + 1] = args
+		local _, value = Presets.ChanceToHitModifier.Default.Aim:CalcValue(self, target, nil, action, args.weapon,
+			nil, false, args.aim or 0, args.opportunity_attack)
+		return value
+	end
+	return unit
+end
+
+-- Returns the to-hit of the crosshair preview of a shot of `unit` at `target` with `aim` aim levels.
+local function PreviewAim(unit, target, aim)
+	return (CombatActions.Attack:GetActionResults(unit, { target = target, aim = aim })).chance_to_hit
+end
+
+local function SetIOSFullAim(full_aim)
+	ApplyModOptions({ IOS = true, IOSFullAim = full_aim })
+end
+
+t.case("IOS full aim under GBO 4: with the option on, an IOS shot gets the full aim bonus of GBO 4 old CTH", function()
+	FakeGBO4OldCTH()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = AimedArmed(Overwatcher{})
+	SetIOSFullAim(true)
+	local cth
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() cth = PreviewAim(ow, mover, 3) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	SetIOS(false)
+	t.eq(cth, 30)
+end)
+
+t.case("IOS full aim under GBO 4: with the option off, an IOS shot gets half of the aim bonus, as in GBO 4 old CTH", function()
+	FakeGBO4OldCTH()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = AimedArmed(Overwatcher{})
+	SetIOSFullAim(false)
+	local cth
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() cth = PreviewAim(ow, mover, 3) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	SetIOS(false)
+	t.eq(cth, 15)
+end)
+
+t.case("IOS full aim under GBO 4: with the option on, a vanilla Overwatch shot outside an IOS interrupt gets half of the aim bonus", function()
+	FakeGBO4OldCTH()
+	local mover = WalkingMover(10)
+	local ow = Overwatcher{}
+	SetIOSFullAim(true)
+	local _, value = Presets.ChanceToHitModifier.Default.Aim:CalcValue(ow, mover, nil, CombatActions.Attack, rifle,
+		nil, false, 3, true)
+	SetIOS(false)
+	t.eq(value, 15)
+end)
+
+t.case("IOS full aim under GBO 4: with the option on, the to-hit preview and the attack of an IOS shot are still Overwatch opportunity attacks", function()
+	FakeGBO4OldCTH()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = AimedArmed(Overwatcher{ attacks = 2, cost = 4000 })
+	SetIOSFullAim(true)
+	local preview
+	local fired = WithFiringAttacks(function()
+		OverwatchTrigger(mover, ow, dummies, {
+			{ at = 100, run = function()
+				PreviewAim(ow, mover, 3)
+				preview = ow.cth_args[#ow.cth_args]
+				Shoot(ow, mover, 4000)()
+			end },
+			{ at = 300, run = PressEndTurn },
+		})
+	end)
+	SetIOS(false)
+	t.eq(preview.opportunity_attack, true)
+	t.eq(preview.opportunity_attack_type, "Overwatch")
+	t.eq(#fired, 1)
+	t.eq(fired[1].opportunity_attack, true)
+	t.eq(fired[1].opportunity_attack_type, "Overwatch")
+end)
+
 t.case("IOS: an error in the handler is logged, and the enemy action continues with the vanilla shot", function()
 	local mover, _, dummies = WalkingMover(10)
 	local ow = Overwatcher{}

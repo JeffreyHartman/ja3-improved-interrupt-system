@@ -67,6 +67,7 @@ local function ApplyOptions()
 	cfg.ios_aim_limit = AimLimitOption(o.IOSAimLimit)
 	cfg.interrupt_aim_limit = AimLimitOption(o.InterruptAimLimit)
 	cfg.ios_free_aim = tonumber(o.IOSFreeAim) or 1
+	cfg.ios_full_aim = o.IOSFullAim == true
 end
 ApplyOptions()
 

@@ -215,10 +215,38 @@ function Unit:PrepareAttackArgs(action_id, args)
 	return attack_args
 end
 
+local full_aim_wrappers = setmetatable({}, { __mode = "k" })
+
+-- GBO 4 sets the CalcValue of the Aim modifier in its function aim_cth, on DataLoaded. In old CTH
+-- mode, that CalcValue halves the aim bonus of an opportunity attack (Code/CTH_aim.lua:232).
+local function WrapGBO4Aim()
+	if type(rawget(_G, "aim_cth")) ~= "function" then return end
+	local presets = rawget(_G, "Presets")
+	local group = presets and presets.ChanceToHitModifier and presets.ChanceToHitModifier.Default
+	local aim_modifier = group and group.Aim
+	if not aim_modifier or full_aim_wrappers[aim_modifier.CalcValue] then return end
+	local orig_CalcValue = aim_modifier.CalcValue
+	local function CalcValue(self, attacker, target, body_part_def, action, weapon1, weapon2, lof, aim,
+		opportunity_attack, ...)
+		if opportunity_attack and IIS.Config.ios_full_aim and IOS.IsOverwatcher(attacker) then
+			opportunity_attack = false
+		end
+		return orig_CalcValue(self, attacker, target, body_part_def, action, weapon1, weapon2, lof, aim,
+			opportunity_attack, ...)
+	end
+	full_aim_wrappers[CalcValue] = true
+	aim_modifier.CalcValue = CalcValue
+end
+
 --- Registers the handler for "overwatch" entries when the IOS option is on, and removes it when
--- the option is off.
+-- the option is off. Wraps the GBO 4 Aim modifier for the "IOS full aim under GBO 4" option.
 function IOS.Install()
 	IISControl.Handle("overwatch", IIS.Config.ios and IOS.InterruptRequest or nil)
+	WrapGBO4Aim()
+end
+
+function OnMsg.DataLoaded()
+	WrapGBO4Aim()
 end
 
 function OnMsg.ModsReloaded()
