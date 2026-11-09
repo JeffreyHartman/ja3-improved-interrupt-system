@@ -452,6 +452,14 @@ t.case("The options list: no removed option, and each option has the color tag o
 	t.eq(names.IOSActions.Help:find("GBO 4") ~= nil, true)
 end)
 
+t.case("The options list: the help text of each option says what changes under GBO 4", function()
+	for _, item in ipairs(LoadModFile("mod/items.lua")) do
+		if item.class:find("^ModItemOption") then
+			t.eq(item.Help:find("GBO 4", 1, true) ~= nil, true, item.name)
+		end
+	end
+end)
+
 t.case("Options: IOS actions gives the action limit of an overwatcher, and Shot only is the default", function()
 	t.eq(ApplyModOptions({ IOSActions = "Any action" }) and Q.Config.ios_actions, "any")
 	t.eq(ApplyModOptions({ IOSActions = "Shot only" }) and Q.Config.ios_actions, "shot")
