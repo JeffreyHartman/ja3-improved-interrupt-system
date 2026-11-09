@@ -136,12 +136,22 @@ netUniqueId = 1
 
 local vanilla_result = {}
 local vanilla_provoked = {}
+local vanilla_attacks = {}
+-- Like vanilla, the fake list function attacks for each "overwatch" entry and adds every entry to
+-- the mover's passed_interrupts.
 Unit = {
 	CheckProvokeOpportunityAttacks = function()
 		return vanilla_result.interrupts, vanilla_result.idx
 	end,
-	ProvokeOpportunityAttacksFromList = function(_, list)
+	ProvokeOpportunityAttacksFromList = function(mover, list)
 		vanilla_provoked[#vanilla_provoked + 1] = list
+		for _, data in ipairs(list) do
+			if data[1] == "overwatch" then
+				vanilla_attacks[#vanilla_attacks + 1] = data[2]
+			end
+			mover.passed_interrupts = mover.passed_interrupts or {}
+			table.insert(mover.passed_interrupts, data)
+		end
 	end,
 	CanBeControlled = function() return "vanilla" end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
@@ -260,6 +270,7 @@ local function ResetWorld()
 	}
 	vanilla_result = {}
 	vanilla_provoked = {}
+	vanilla_attacks = {}
 	Q.Config.enabled = true
 	Q.Config.system = "IIS"
 	Q.Config.require_attack_ap = true
@@ -1359,4 +1370,162 @@ t.case("When the mover's command ends in an interrupt, its destructor ends the i
 	t.eq(IISControl.Active(), false)
 	t.eq(g_Combat.is_player_control, false)
 	t.eq(pops, 0)
+end)
+
+------------------------------------------------------------------------------------------------
+-- The provoke-list wrapper with more than one entry type
+
+-- Registers `fakes` (entry type -> handler) while `f` runs, then puts back the real "iis" handler
+-- and removes the others.
+local function WithHandlers(fakes, f)
+	for entry_type, handler in pairs(fakes) do
+		IISControl.Handle(entry_type, handler)
+	end
+	local ok, err = pcall(f)
+	for entry_type in pairs(fakes) do
+		IISControl.Handle(entry_type, nil)
+	end
+	IISControl.Handle("iis", Q.InterruptRequest)
+	game_time = 0
+	if not ok then error(err, 0) end
+end
+
+t.case("The overwatch handler runs before the iis handler when the iis entry is first in the list", function()
+	local mover, a, dummies = WalkingMover(10)
+	local b = FakeUnit({ id = "b" })
+	FakeControl()
+	local order = {}
+	WithHandlers({
+		iis = function() order[#order + 1] = "iis" end,
+		overwatch = function() order[#order + 1] = "overwatch" end,
+	}, function()
+		Unit.ProvokeOpportunityAttacksFromList(mover, {
+			{ "iis", a, {}, dummies[4] },
+			{ "overwatch", b, "attack args", dummies[4] },
+		})
+	end)
+	t.eq(table.concat(order, ", "), "overwatch, iis")
+end)
+
+t.case("Two overwatch entries on one step reach the handler in one call", function()
+	local mover, a, dummies = WalkingMover(10)
+	local b = FakeUnit({ id = "b" })
+	FakeControl()
+	local calls = {}
+	local first = { "overwatch", a, "args a", dummies[4] }
+	local second = { "overwatch", b, "args b", dummies[4] }
+	WithHandlers({
+		overwatch = function(m, entry, n, entries) calls[#calls + 1] = { m, entry, n, entries } end,
+	}, function()
+		Unit.ProvokeOpportunityAttacksFromList(mover, { first, { "iis", a, {}, dummies[4] }, second })
+	end)
+	t.eq(#calls, 1)
+	t.eq(calls[1][1], mover)
+	t.eq(calls[1][2], first)
+	t.eq(#calls[1][4], 2)
+	t.eq(calls[1][4][1], first)
+	t.eq(calls[1][4][2], second)
+end)
+
+-- An overwatch handler that takes the entries of the player units and leaves the others.
+local function TakePlayers(_, _, _, entries)
+	local mine = {}
+	for _, e in ipairs(entries) do
+		if e[2].team == player_team then
+			mine[#mine + 1] = e[2]
+		end
+	end
+	if #mine == 0 then return end
+	return { interrupters = mine, dummy = entries[1][4], stop = false, label = "Test overwatch" }
+end
+
+t.case("Vanilla fires no attack for a handled overwatch entry, and still adds its attacker to the passed interrupts", function()
+	local mover, a, dummies = WalkingMover(10)
+	local foe = FakeUnit({ id = "foe", team = enemy_team })
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	local n = IISControl.InterruptCount() + 1
+	WithHandlers({ overwatch = TakePlayers }, function()
+		Unit.ProvokeOpportunityAttacksFromList(mover, {
+			{ "overwatch", a, "args a", dummies[4] },
+			{ "overwatch", foe, "args foe", dummies[4] },
+		})
+	end)
+	t.eq(LogHas("INT #" .. n .. " BEGIN Test overwatch"), true)
+	t.eq(#vanilla_attacks, 1)
+	t.eq(vanilla_attacks[1], foe)
+	t.eq(table.find(mover.passed_interrupts, 2, a) ~= nil, true)
+	t.eq(table.find(mover.passed_interrupts, 2, foe) ~= nil, true)
+end)
+
+t.case("An entry type with no handler goes to vanilla unchanged next to a handled entry", function()
+	local mover, a, dummies = WalkingMover(10)
+	local b = FakeUnit({ id = "b" })
+	FakeControl{ { at = 300, run = PressEndTurn } }
+	local melee = { "melee", b, "melee args", dummies[4] }
+	local list = { melee, { "overwatch", a, "args a", dummies[4] } }
+	WithHandlers({ overwatch = TakePlayers }, function()
+		Unit.ProvokeOpportunityAttacksFromList(mover, list)
+	end)
+	t.eq(vanilla_provoked[1], list)
+	t.eq(list[1], melee)
+	t.eq(melee[1], "melee")
+	t.eq(melee[2], b)
+	t.eq(melee[3], "melee args")
+	t.eq(melee[4], dummies[4])
+end)
+
+t.case("An AP grant sets the interrupter's AP during the interrupt, and the handler gets the AP that is left", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = FakeUnit({ id = "ow", ap = 0 })
+	local during, left
+	FakeControl{
+		{ at = 100, run = function()
+			during = ow.ActionPoints
+			ow:ConsumeAP(3000)
+		end },
+		{ at = 300, run = PressEndTurn },
+	}
+	WithHandlers({
+		overwatch = function(_, entry)
+			return { interrupters = { ow }, dummy = entry[4], stop = false, label = "Test overwatch",
+				ap_grants = { [ow] = 8000 }, on_end = function(ap_left) left = ap_left end }
+		end,
+	}, function()
+		Unit.ProvokeOpportunityAttacksFromList(mover, { { "overwatch", ow, "args", dummies[4] } })
+	end)
+	t.eq(during, 8000)
+	t.eq(left and left[ow], 5000)
+	t.eq(ow.ActionPoints, 0)
+end)
+
+t.case("An action limit stops an action that the check refuses, and allows an action that the check accepts", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = FakeUnit({ id = "ow", ap = 8000 })
+	local other = FakeUnit({ id = "other", team = enemy_team })
+	local asked = {}
+	local function shot_at_mover(action_id, target)
+		asked[#asked + 1] = action_id
+		return action_id == "Attack" and target == mover
+	end
+	FakeControl{
+		{ at = 100, run = function()
+			StartCombatAction("Move", ow, 1000, { goto_pos = { x = 9, y = 9 } })
+			StartCombatAction("Attack", ow, 2000, { target = other })
+			StartCombatAction("Attack", ow, 2000, { target = mover })
+		end },
+		{ at = 300, run = PressEndTurn },
+	}
+	WithHandlers({
+		overwatch = function(_, entry)
+			return { interrupters = { ow }, dummy = entry[4], stop = false, label = "Test overwatch",
+				action_limits = { [ow] = shot_at_mover } }
+		end,
+	}, function()
+		Unit.ProvokeOpportunityAttacksFromList(mover, { { "overwatch", ow, "args", dummies[4] } })
+	end)
+	t.eq(table.concat(asked, ", "), "Move, Attack, Attack")
+	t.eq(#ran_actions, 1)
+	t.eq(ran_actions[1][1], "Attack")
+	t.eq(ow.ActionPoints, 6000)
+	t.eq(#vanilla_started, 0)
 end)
