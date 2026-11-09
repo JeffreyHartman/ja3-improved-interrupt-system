@@ -1703,14 +1703,18 @@ local function Overwatcher(o)
 	return u
 end
 
--- Gives the WalkingMover's provoke list an "overwatch" entry of `ow` on step 4, and returns the list.
 -- Unless a test says otherwise, `ow` sees the mover and has it in its cone, as vanilla requires for
 -- a trigger.
-local function OverwatchTrigger(mover, ow, dummies, script)
+local function WatchMover(ow, mover)
 	for _, rows in ipairs{ world.sees, world.cone } do
 		rows[ow] = rows[ow] or {}
 		if rows[ow][mover] == nil then rows[ow][mover] = true end
 	end
+end
+
+-- Gives the WalkingMover's provoke list an "overwatch" entry of `ow` on step 4, and returns the list.
+local function OverwatchTrigger(mover, ow, dummies, script)
+	WatchMover(ow, mover)
 	FakeControl(script)
 	local list = { { "overwatch", ow, { target = mover }, dummies[4] } }
 	Unit.ProvokeOpportunityAttacksFromList(mover, list)
@@ -2013,6 +2017,7 @@ local function OverwatchTriggers(mover, ows, dummies, script, extra)
 	FakeControl(script)
 	local list = {}
 	for _, ow in ipairs(ows) do
+		WatchMover(ow, mover)
 		list[#list + 1] = { "overwatch", ow, { target = mover }, dummies[4] }
 	end
 	for _, e in ipairs(extra or {}) do
