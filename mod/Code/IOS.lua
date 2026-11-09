@@ -217,16 +217,23 @@ function IOS.IsOverwatcher(unit)
 	return it and it:Number() == ios_interrupt and it:IsInterrupter(unit) or false
 end
 
--- The crosshair's to-hit preview and Unit:FirearmAttack both get their attack args from here. The
--- vanilla Overwatch shot is always a firearm attack, so other attacks stay as they are.
-local orig_PrepareAttackArgs = Unit.PrepareAttackArgs
-function Unit:PrepareAttackArgs(action_id, args)
-	local attack_args = orig_PrepareAttackArgs(self, action_id, args)
-	if IsKindOf(attack_args.weapon, "Firearm") and IOS.IsOverwatcher(self) then
-		attack_args.opportunity_attack = true
-		attack_args.opportunity_attack_type = "Overwatch"
+--- Wraps Unit:PrepareAttackArgs, unless the wrap is already in place. The wrap makes the firearm
+-- attack of an overwatcher an Overwatch opportunity attack.
+-- The crosshair's to-hit preview and Unit:FirearmAttack both get their attack args from
+-- Unit:PrepareAttackArgs. The vanilla Overwatch shot is always a firearm attack, so other attacks
+-- stay as they are.
+function IOS.HookAttackArgs()
+	if Unit.PrepareAttackArgs == IOS.attack_args_hook then return end
+	local orig = Unit.PrepareAttackArgs
+	IOS.attack_args_hook = function(self, action_id, args, ...)
+		local attack_args = orig(self, action_id, args, ...)
+		if IsKindOf(attack_args.weapon, "Firearm") and IOS.IsOverwatcher(self) then
+			attack_args.opportunity_attack = true
+			attack_args.opportunity_attack_type = "Overwatch"
+		end
+		return attack_args
 	end
-	return attack_args
+	Unit.PrepareAttackArgs = IOS.attack_args_hook
 end
 
 local full_aim_wrappers = setmetatable({}, { __mode = "k" })
@@ -263,7 +270,10 @@ function OnMsg.DataLoaded()
 	WrapGBO4Aim()
 end
 
+-- GBO 4 wraps Unit:PrepareAttackArgs when its code loads, which can be after this mod.
 function OnMsg.ModsReloaded()
+	IIS.SafeCall(nil, "attack args hook", IOS.HookAttackArgs)
+	Log("attack args hook: %s", Unit.PrepareAttackArgs == IOS.attack_args_hook and "ours" or "REPLACED")
 	IOS.Install()
 end
 

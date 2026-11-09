@@ -143,6 +143,16 @@ local vanilla_result = {}
 local vanilla_provoked = {}
 local vanilla_attacks = {}
 local function vanilla_aim_range(self) return self.min_aim or 0, self.max_aim or 3 end
+-- Like vanilla, it returns a copy of `args` with the attacker and the weapon of the action.
+local function vanilla_prepare_attack_args(unit, action_id, args)
+	local attack_args = {}
+	for k, v in pairs(args or {}) do
+		attack_args[k] = v
+	end
+	attack_args.action_id, attack_args.obj = action_id, unit
+	attack_args.weapon = attack_args.weapon or unit.weapon
+	return attack_args
+end
 -- Like vanilla, the fake list function attacks for each "overwatch" entry and adds every entry to
 -- the mover's passed_interrupts.
 Unit = {
@@ -162,16 +172,7 @@ Unit = {
 	CanBeControlled = function() return "vanilla" end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
 	GetBaseAimLevelRange = vanilla_aim_range,
-	-- Like vanilla, it returns a copy of `args` with the attacker and the weapon of the action.
-	PrepareAttackArgs = function(unit, action_id, args)
-		local attack_args = {}
-		for k, v in pairs(args or {}) do
-			attack_args[k] = v
-		end
-		attack_args.action_id, attack_args.obj = action_id, unit
-		attack_args.weapon = attack_args.weapon or unit.weapon
-		return attack_args
-	end,
+	PrepareAttackArgs = vanilla_prepare_attack_args,
 }
 function IsNetPlayerTurn() return "vanilla" end
 function CombatActionCannotBeStarted() return "vanilla" end
@@ -204,6 +205,8 @@ dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
 dofile("mod/Code/IOS.lua")
 dofile("mod/Code/Aim.lua")
+-- A mod whose code loads after this mod's code wraps this function.
+local prepare_attack_args_after_load = Unit.PrepareAttackArgs
 -- The game sends ModsReloaded after it runs the code files.
 OnMsg.ModsReloaded()
 
@@ -2156,6 +2159,54 @@ t.case("IOS: the to-hit preview of an overwatcher's attack with a weapon that is
 	})
 	t.eq(args.opportunity_attack, nil)
 	t.eq(args.opportunity_attack_type, nil)
+end)
+
+-- Like GBO 4 (FEATURE_StepOutGate.lua), a wrap that calls the function that was in place when its
+-- code loaded. It records the args that it gets from that function in `seen`.
+local function GBOAttackArgsWrap(loaded, seen)
+	return function(self, action_id, args)
+		local attack_args = loaded(self, action_id, args)
+		seen[#seen + 1] = attack_args.opportunity_attack or false
+		return attack_args
+	end
+end
+
+-- Returns the preview args of an overwatcher's shot and what a GBO 4 wrap saw. `gbo_first` puts the
+-- GBO 4 code before this mod's code in the load order.
+local function PreviewOverGBOWrap(gbo_first)
+	local seen = {}
+	local loaded = gbo_first and vanilla_prepare_attack_args or prepare_attack_args_after_load
+	Unit.PrepareAttackArgs = GBOAttackArgsWrap(loaded, seen)
+	OnMsg.ModsReloaded()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Armed(Overwatcher{})
+	SetIOS(true)
+	local args
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() args = PreviewArgs(ow, mover) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	Unit.PrepareAttackArgs = vanilla_prepare_attack_args
+	OnMsg.ModsReloaded()
+	return args, seen
+end
+
+t.case("IOS: in either load order with GBO 4, the preview is an Overwatch opportunity attack, and GBO 4 sees the args of the game", function()
+	for _, gbo_first in ipairs{ true, false } do
+		local args, seen = PreviewOverGBOWrap(gbo_first)
+		t.eq(args.opportunity_attack, true, tostring(gbo_first))
+		t.eq(args.opportunity_attack_type, "Overwatch", tostring(gbo_first))
+		t.eq(#seen, 1, tostring(gbo_first))
+		t.eq(seen[1], false, tostring(gbo_first))
+	end
+end)
+
+t.case("IOS: the attack args hook is in place after a second ModsReloaded", function()
+	log_lines = {}
+	OnMsg.ModsReloaded()
+	OnMsg.ModsReloaded()
+	t.eq(LogHas("attack args hook: ours"), true)
+	t.eq(LogHas("attack args hook: REPLACED"), false)
 end)
 
 t.case("IIS: the to-hit preview and the attack args of a winner's shot are not an opportunity attack", function()
