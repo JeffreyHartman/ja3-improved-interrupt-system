@@ -27,6 +27,7 @@ return PlaceObj('ModDef', {
 		MovingTargetPenalty = "0",
 		VerboseLog = false,
 		IOS = false,
+		IOSActions = "Shot only",
 		IOSAimLimit = "100%",
 		InterruptAimLimit = "100%",
 	},

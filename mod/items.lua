@@ -76,6 +76,16 @@ return {
 		'DefaultValue', false,
 	}),
 	PlaceObj('ModItemOptionChoice', {
+		'name', "IOSActions",
+		'DisplayName', "<color AmmoMatchColor>IOS actions</color>",
+		'Help', "What a merc can do in an IOS interrupt. Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action that its pool pays for. After the interrupt, Overwatch ends when the merc moved, changed stance or did an action that is not an attack or a reload, and the rest of the pool is lost. Otherwise Overwatch stays while the pool pays for one attack. Under GBO 4, an action that removes the Shooting Stance also ends Overwatch.",
+		'DefaultValue', "Shot only",
+		'ChoiceList', {
+			"Shot only",
+			"Any action",
+		},
+	}),
+	PlaceObj('ModItemOptionChoice', {
 		'name', "IOSAimLimit",
 		'DisplayName', "<color AmmoMatchColor>IOS aim limit</color>",
 		'Help', "The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. It simulates a merc that has no time for a full aim. A weapon with 3 aim levels gets 1, 2, 3 or 3 levels. Under GBO 4, a weapon has up to 10 aim levels, so 25% of 10 levels gives 3. The limit never goes below the minimum aim of the shot.",
