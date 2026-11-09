@@ -52,9 +52,10 @@ end
 --- Makes `it` the active interrupt and returns two new tables for it: the engine state that the
 -- takeover list takes, and the counters for the END log line.
 -- `dummy` is the step of the mover's path where the interrupt caught it, or nil. `req` is the
--- handler's request, or nil.
-function IISControl.Activate(it, dummy, req)
-	taken = { dummy = dummy, ap_before = {} }
+-- handler's request, or nil. `ap_before` holds the raw AP that each granted interrupter had before
+-- its grant, or is nil when no interrupter has a grant.
+function IISControl.Activate(it, dummy, req, ap_before)
+	taken = { dummy = dummy, ap_before = ap_before or {} }
 	counters = { start_time = GameTime(), start_ap = {}, forced = {} }
 	request = req or empty_table
 	started = {}
@@ -389,8 +390,7 @@ local function Run(mover, req, n)
 	-- InterruptBegin sets 3% animation speed for the overwatch slow motion. Hit reactions on the
 	-- frozen enemy would then play 33 times slower.
 	mover:SetAnimSpeedModifier(1000)
-	local state = IISControl.Activate(it, req.dummy, req)
-	state.ap_before = ap_before
+	local state = IISControl.Activate(it, req.dummy, req, ap_before)
 	TakeEngine(it, state)
 	SafeCall(it, "UI.Begin", IIS.UI.Begin, it, req.banner)
 	SafeCall(it, "control log", function()
