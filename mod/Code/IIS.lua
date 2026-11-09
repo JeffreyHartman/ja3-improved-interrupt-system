@@ -26,6 +26,8 @@ IIS.Config = {
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
 	ios = false,                 -- IOS: the Overwatch trigger of a merc starts an interrupt (IOS.lua)
+	ios_aim_limit = 100,         -- percent of the maximum aim levels that an overwatcher can use (Aim.lua)
+	interrupt_aim_limit = 100,   -- the same for a winner or a joiner of an IIS or JA2 Classic interrupt
 }
 
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
@@ -39,6 +41,10 @@ local function InterruptSystemOption(o)
 	if rawget(o, "Enabled") == false then return "Off" end
 	if rawget(o, "System") == "Classic" then return "JA2 Classic" end
 	return "IIS"
+end
+
+local function AimLimitOption(value)
+	return tonumber(type(value) == "string" and value:match("^(%d+)%%$")) or 100
 end
 
 -- The game loads mod options before this code runs.
@@ -55,6 +61,8 @@ local function ApplyOptions()
 	cfg.moving_target_penalty = tonumber(o.MovingTargetPenalty) or 0
 	cfg.log_checks = o.VerboseLog == true
 	cfg.ios = o.IOS == true
+	cfg.ios_aim_limit = AimLimitOption(o.IOSAimLimit)
+	cfg.interrupt_aim_limit = AimLimitOption(o.InterruptAimLimit)
 end
 ApplyOptions()
 
@@ -799,6 +807,7 @@ function IIS.InterruptRequest(mover, entry, n)
 		label = info.system .. " " .. info.kind,
 		where = info.where,
 		notes = notes,
+		aim_limit = cfg.interrupt_aim_limit,
 	}
 end
 
@@ -946,10 +955,11 @@ function OnMsg.UnitMovementDone(unit)
 end
 
 function IIS.HookStatus()
-	return string.format("check_hook=%s provoke_hook=%s exec_trace=%s",
+	return string.format("check_hook=%s provoke_hook=%s exec_trace=%s aim_hook=%s",
 		Unit.CheckProvokeOpportunityAttacks == IIS.check_hook and "ours" or "REPLACED",
 		Unit.ProvokeOpportunityAttacksFromList == IIS.provoke_hook and "ours" or "REPLACED",
-		not IIS.exec_hook and "off" or Unit.ExecFirearmAttacks == IIS.exec_hook and "ours" or "REPLACED")
+		not IIS.exec_hook and "off" or Unit.ExecFirearmAttacks == IIS.exec_hook and "ours" or "REPLACED",
+		not IIS.aim_hook and "off" or Unit.GetBaseAimLevelRange == IIS.aim_hook and "ours" or "REPLACED")
 end
 
 local function ResetCombatState(why)
@@ -1023,10 +1033,10 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s",
+	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_aim_limit=%s interrupt_aim_limit=%s",
 		why, c.system, tostring(c.collective), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
 		tostring(c.moving_target_penalty),
-		tostring(c.log_checks), tostring(c.ios))
+		tostring(c.log_checks), tostring(c.ios), tostring(c.ios_aim_limit), tostring(c.interrupt_aim_limit))
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks

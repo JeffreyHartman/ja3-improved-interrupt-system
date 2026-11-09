@@ -138,6 +138,7 @@ netUniqueId = 1
 local vanilla_result = {}
 local vanilla_provoked = {}
 local vanilla_attacks = {}
+local function vanilla_aim_range(self) return self.min_aim or 0, self.max_aim or 3 end
 -- Like vanilla, the fake list function attacks for each "overwatch" entry and adds every entry to
 -- the mover's passed_interrupts.
 Unit = {
@@ -156,6 +157,7 @@ Unit = {
 	end,
 	CanBeControlled = function() return "vanilla" end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
+	GetBaseAimLevelRange = vanilla_aim_range,
 }
 function IsNetPlayerTurn() return "vanilla" end
 function CombatActionCannotBeStarted() return "vanilla" end
@@ -187,6 +189,7 @@ OnMsg = setmetatable({}, {
 dofile("mod/Code/IIS.lua")
 dofile("mod/Code/Control.lua")
 dofile("mod/Code/IOS.lua")
+dofile("mod/Code/Aim.lua")
 -- The game sends ModsReloaded after it runs the code files.
 OnMsg.ModsReloaded()
 
@@ -2004,4 +2007,155 @@ t.case("IOS: an overwatcher that does not shoot because another overwatcher kill
 	})
 	SetIOS(false)
 	t.eq(during, 7500)
+end)
+
+------------------------------------------------------------------------------------------------
+-- Aim limits through the wrapped Unit:GetBaseAimLevelRange
+
+local aim_action = { id = "SingleShot", IsAimableAttack = true }
+
+local function AimRange(u)
+	return Unit.GetBaseAimLevelRange(u, aim_action)
+end
+
+-- Runs an IOS interrupt for `ow` with the options `options` and returns the aim range of `ow` in it.
+local function OverwatcherAimRange(ow, options)
+	local mover, _, dummies = WalkingMover(10)
+	options.IOS = true
+	ApplyModOptions(options)
+	local min, max
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() min, max = AimRange(ow) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	ApplyModOptions({})
+	return min, max
+end
+
+t.case("Aim limit: the IOS and Interrupt aim limit options have the values 25% to 100% and the color of their group", function()
+	local names = {}
+	for _, item in ipairs(LoadModFile("mod/items.lua")) do
+		names[item.name] = item
+	end
+	for name, group in pairs({ IOSAimLimit = "IOS", InterruptAimLimit = "Interrupt System" }) do
+		t.eq(table.concat(names[name].ChoiceList, ","), "25%,50%,75%,100%", name)
+		t.eq(names[name].DefaultValue, "100%", name)
+		t.eq(names[name].DisplayName:match("<color (%w+)>"), group_colors[group], name)
+	end
+	t.eq(names.IOSAimLimit.DisplayName:find("IOS aim limit", 1, true) ~= nil, true)
+	t.eq(names.InterruptAimLimit.DisplayName:find("Interrupt aim limit", 1, true) ~= nil, true)
+end)
+
+t.case("Aim limit: a 3-level weapon at 50% gives an overwatcher a maximum of 2 levels", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 3
+	local min, max = OverwatcherAimRange(ow, { IOSAimLimit = "50%" })
+	t.eq(min, 0)
+	t.eq(max, 2)
+end)
+
+t.case("Aim limit: a 10-level weapon at 25% gives an overwatcher a maximum of 3 levels", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local _, max = OverwatcherAimRange(ow, { IOSAimLimit = "25%" })
+	t.eq(max, 3)
+end)
+
+t.case("Aim limit: an overwatcher gets the IOS aim limit, and an IIS winner gets the Interrupt aim limit", function()
+	local options = { IOSAimLimit = "50%", InterruptAimLimit = "25%" }
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local _, ow_max = OverwatcherAimRange(ow, options)
+	t.eq(ow_max, 5)
+
+	local mover, a, dummies = WalkingMover(10)
+	a.max_aim = 10
+	local winner_max
+	FakeControl{
+		{ at = 100, run = function() winner_max = select(2, AimRange(a)) end },
+		{ at = 300, run = PressEndTurn },
+	}
+	ApplyModOptions(options)
+	Unit.ProvokeOpportunityAttacksFromList(mover, Unit.CheckProvokeOpportunityAttacks(mover, nil, "move", dummies))
+	ApplyModOptions({})
+	game_time = 0
+	t.eq(winner_max, 3)
+end)
+
+t.case("Aim limit: no limit when no interrupt is active, or for a unit that is not an interrupter", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local other = FakeUnit({ id = "b" })
+	other.max_aim = 10
+	local mover, _, dummies = WalkingMover(10)
+	mover.max_aim = 10
+	ApplyModOptions({ IOS = true, IOSAimLimit = "25%", InterruptAimLimit = "25%" })
+	local other_max, mover_max
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			other_max = select(2, AimRange(other))
+			mover_max = select(2, AimRange(mover))
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	local _, after_max = AimRange(ow)
+	ApplyModOptions({})
+	t.eq(other_max, 10)
+	t.eq(mover_max, 10)
+	t.eq(after_max, 10)
+end)
+
+t.case("Aim limit: the maximum never goes below the minimum", function()
+	local ow = Overwatcher{}
+	ow.min_aim, ow.max_aim = 2, 3
+	local min, max = OverwatcherAimRange(ow, { IOSAimLimit = "25%" })
+	t.eq(min, 2)
+	t.eq(max, 2)
+end)
+
+-- Like GBO 4, a wrap that calls the function that was in place when its code loaded and changes
+-- the range it returns.
+local function GBOAimWrap(loaded)
+	return function(self, action, target)
+		local min, max = loaded(self, action, target)
+		return math.max(min, 1), max + 7
+	end
+end
+
+-- GBO 4 replaces the function when its code loads, so in either load order its wrap of vanilla is
+-- in place when the game sends ModsReloaded.
+t.case("Aim limit: the limit applies over a GBO 4 wrap of the aim range function in either load order", function()
+	Unit.GetBaseAimLevelRange = GBOAimWrap(vanilla_aim_range)
+	OnMsg.ModsReloaded()
+	local ow = Overwatcher{}
+	local min, max = OverwatcherAimRange(ow, { IOSAimLimit = "25%" })
+	local after_min, after_max = AimRange(ow)
+	Unit.GetBaseAimLevelRange = vanilla_aim_range
+	OnMsg.ModsReloaded()
+	t.eq(min, 1)
+	t.eq(max, 3)
+	t.eq(after_min, 1)
+	t.eq(after_max, 10)
+end)
+
+t.case("Aim limit: a second ModsReloaded does not apply the limit twice", function()
+	OnMsg.ModsReloaded()
+	OnMsg.ModsReloaded()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local _, max = OverwatcherAimRange(ow, { IOSAimLimit = "25%" })
+	t.eq(max, 3)
+end)
+
+t.case("Aim limit: an error in the limit is logged, and the range of the wrapped function goes through", function()
+	Unit.GetBaseAimLevelRange = function() return 0, "three" end
+	OnMsg.ModsReloaded()
+	local ow = Overwatcher{}
+	local min, max = OverwatcherAimRange(ow, { IOSAimLimit = "25%" })
+	local logged = LogHas("aim limit failed")
+	Unit.GetBaseAimLevelRange = vanilla_aim_range
+	OnMsg.ModsReloaded()
+	t.eq(min, 0)
+	t.eq(max, "three")
+	t.eq(logged, true)
 end)

@@ -9,6 +9,7 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 ### Added
 
 - The "Improved Overwatch System (IOS)" option, off by default. When the Overwatch trigger of a merc happens, the merc acts in an interrupt in place of the vanilla Overwatch shot. Its AP in the interrupt is its Overwatch attacks multiplied by the cost of its default attack. The AP that it does not spend stays for the next trigger, and a pass costs nothing. The enemy always continues its action (#29).
+- The "IOS aim limit" and "Interrupt aim limit" options: 25%, 50%, 75% or 100% of the weapon's aim levels, rounded up, in an IOS interrupt or in an IIS or JA2 Classic interrupt. The default 100% gives all aim levels (#33).
 - A "Moving target penalty" option. It gives a to-hit penalty for a merc's shot in an interrupt at the enemy that the interrupt paused, by the design of the vanilla Evasive Movement modifier. The default 0 gives no penalty (#35).
 
 ### Changed

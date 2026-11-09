@@ -110,6 +110,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 		label = "IOS overwatch",
 		notes = notes,
 		banner = "Overwatch",
+		aim_limit = IIS.Config.ios_aim_limit,
 		ap_grants = grants,
 		on_end = function(ap_left)
 			for _, m in ipairs(overwatchers) do

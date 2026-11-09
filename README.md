@@ -45,7 +45,9 @@ The options list shows each group of options in one color: one color for the Int
 | Interrupted enemy | Interrupt System | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
 | IIS reaction time | Interrupt System | 25 | Lower values give more interrupts. |
 | IIS AP registered (%) | Interrupt System | 60 | Higher values give more interrupts. |
+| Interrupt aim limit | Interrupt System | 100% | The part of the weapon's aim levels that a merc can use in an IIS or JA2 Classic interrupt, rounded up. |
 | Improved Overwatch System (IOS) | IOS | off | The Overwatch trigger of a merc starts an interrupt in place of the Overwatch shot. |
+| IOS aim limit | IOS | 100% | The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. |
 | Verbose log | Both systems | off | Writes more detail to the game log. |
 
 A setting from version 0.7.3 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".
