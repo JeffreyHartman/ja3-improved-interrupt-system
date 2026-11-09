@@ -30,6 +30,7 @@ return PlaceObj('ModDef', {
 		IOSActions = "Shot only",
 		IOSAimLimit = "100%",
 		InterruptAimLimit = "100%",
+		IOSFreeAim = "1",
 	},
 	'TagGameplay', true,
 })

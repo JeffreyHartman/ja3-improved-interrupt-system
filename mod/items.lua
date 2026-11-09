@@ -97,6 +97,17 @@ return {
 			"100%",
 		},
 	}),
+	PlaceObj('ModItemOptionChoice', {
+		'name', "IOSFreeAim",
+		'DisplayName', "<color AmmoMatchColor>IOS free aim levels</color>",
+		'Help', "The minimum aim level of a merc's shot in an IOS interrupt, as a prepared weapon gives. The levels up to the minimum cost no AP. The value is a total, not a bonus: a shot that already has a higher minimum keeps it. A merc with Killzone gets 1 free level, or the value of this option when it is higher. Under GBO 4, the Shooting Stance level counts toward the total, so the value 1 gives no extra level in the Shooting Stance, and Killzone gives the free levels of the GBO 4 Killzone ladder for each new target in the turn.",
+		'DefaultValue', "1",
+		'ChoiceList', {
+			"0",
+			"1",
+			"2",
+		},
+	}),
 	PlaceObj('ModItemOptionToggle', {
 		'name', "VerboseLog",
 		'DisplayName', "<color AmmoTracerColor>Verbose log</color>",

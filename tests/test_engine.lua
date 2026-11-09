@@ -2311,7 +2311,7 @@ end)
 t.case("Aim limit: a 3-level weapon at 50% gives an overwatcher a maximum of 2 levels", function()
 	local ow = Overwatcher{}
 	ow.max_aim = 3
-	local min, max = OverwatcherAimRange(ow, { IOSAimLimit = "50%" })
+	local min, max = OverwatcherAimRange(ow, { IOSAimLimit = "50%", IOSFreeAim = "0" })
 	t.eq(min, 0)
 	t.eq(max, 2)
 end)
@@ -2414,10 +2414,212 @@ t.case("Aim limit: an error in the limit is logged, and the range of the wrapped
 	OnMsg.ModsReloaded()
 	local ow = Overwatcher{}
 	local min, max = OverwatcherAimRange(ow, { IOSAimLimit = "25%" })
-	local logged = LogHas("aim limit failed")
+	local logged = LogHas("aim range failed")
 	Unit.GetBaseAimLevelRange = vanilla_aim_range
 	OnMsg.ModsReloaded()
 	t.eq(min, 0)
 	t.eq(max, "three")
 	t.eq(logged, true)
+end)
+
+------------------------------------------------------------------------------------------------
+-- IOS free aim levels through the wrapped Unit:GetBaseAimLevelRange
+
+t.case("Free aim: the IOS free aim levels option has the values 0 to 2, the default 1 and the IOS color", function()
+	local item
+	for _, i in ipairs(LoadModFile("mod/items.lua")) do
+		if i.name == "IOSFreeAim" then item = i end
+	end
+	t.eq(table.concat(item.ChoiceList, ","), "0,1,2")
+	t.eq(item.DefaultValue, "1")
+	t.eq(item.DisplayName:match("<color (%w+)>"), group_colors.IOS)
+	t.eq(item.DisplayName:find("IOS free aim levels", 1, true) ~= nil, true)
+	t.eq(item.Help:find("GBO 4", 1, true) ~= nil, true)
+	t.eq(ApplyModOptions({}) and Q.Config.ios_free_aim, 1)
+	t.eq(ApplyModOptions({ IOSFreeAim = "2" }) and Q.Config.ios_free_aim, 2)
+	ApplyModOptions({})
+end)
+
+t.case("Free aim: with the value 1 and no GBO 4, the minimum aim of an overwatcher's shot is 1", function()
+	local ow = Overwatcher{}
+	local min, max = OverwatcherAimRange(ow, { IOSFreeAim = "1" })
+	t.eq(min, 1)
+	t.eq(max, 3)
+end)
+
+-- Like GBO 4, a wrap that gives a unit in the Shooting Stance a minimum of 1 aim level.
+local function GBOStanceWrap(loaded)
+	return function(self, action, target)
+		local min, max = loaded(self, action, target)
+		if self.Mobile_aimed then min = math.max(min, 1) end
+		return min, max + 7
+	end
+end
+
+-- Runs OverwatcherAimRange for an overwatcher in the GBO 4 Shooting Stance.
+local function StanceAimRange(options)
+	Unit.GetBaseAimLevelRange = GBOStanceWrap(vanilla_aim_range)
+	OnMsg.ModsReloaded()
+	local ow = Overwatcher{}
+	ow.Mobile_aimed = true
+	local min, max = OverwatcherAimRange(ow, options)
+	Unit.GetBaseAimLevelRange = vanilla_aim_range
+	OnMsg.ModsReloaded()
+	return min, max
+end
+
+t.case("Free aim: the value is a total, so the value 1 gives no extra level in the GBO 4 Shooting Stance", function()
+	local min, max = StanceAimRange({ IOSFreeAim = "1" })
+	t.eq(min, 1)
+	t.eq(max, 10)
+end)
+
+t.case("Free aim: with the value 2 in the GBO 4 Shooting Stance, the minimum aim is 2", function()
+	local min = StanceAimRange({ IOSFreeAim = "2" })
+	t.eq(min, 2)
+end)
+
+t.case("Free aim: the minimum never goes above the maximum aim levels of the weapon", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 1
+	local min, max = OverwatcherAimRange(ow, { IOSFreeAim = "2" })
+	t.eq(min, 1)
+	t.eq(max, 1)
+end)
+
+t.case("Free aim: no free levels for an IIS winner, a unit that is not an interrupter, or outside an interrupt", function()
+	local ow = Overwatcher{}
+	local other = FakeUnit({ id = "b" })
+	local mover, _, dummies = WalkingMover(10)
+	ApplyModOptions({ IOS = true, IOSFreeAim = "2" })
+	local other_min, mover_min
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			other_min = AimRange(other)
+			mover_min = AimRange(mover)
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	local after_min = AimRange(ow)
+
+	local iis_mover, a, iis_dummies = WalkingMover(10)
+	local winner_min
+	FakeControl{
+		{ at = 100, run = function() winner_min = AimRange(a) end },
+		{ at = 300, run = PressEndTurn },
+	}
+	Unit.ProvokeOpportunityAttacksFromList(iis_mover, Unit.CheckProvokeOpportunityAttacks(iis_mover, nil, "move", iis_dummies))
+	ApplyModOptions({})
+	game_time = 0
+	t.eq(other_min, 0)
+	t.eq(mover_min, 0)
+	t.eq(after_min, 0)
+	t.eq(winner_min, 0)
+end)
+
+-- Like GBO 4 Rat_KillzoneAim, it gives `aim`, or the ladder value of `target` capped at the maximum
+-- aim of the attacker, when the target is a unit. `ladder[target]` is the value of each target.
+local function FakeKillzoneAim(ladder, targets)
+	return function(attacker, target, aim, action)
+		targets[#targets + 1] = target
+		if not IsKindOf(target, "Unit") then return aim end
+		local _, max = Unit.GetBaseAimLevelRange(attacker, action, target)
+		return math.max(aim, math.min(ladder[target] or 0, max))
+	end
+end
+
+-- Runs OverwatcherAimRange with a fake GBO 4 Killzone ladder that gives the mover `value`.
+-- Returns the aim range and the targets that the ladder got.
+local function KillzoneAimRange(ow, value, options)
+	local targets = {}
+	local mover, _, dummies = WalkingMover(10)
+	Rat_KillzoneAim = FakeKillzoneAim({ [mover] = value }, targets)
+	options.IOS = true
+	ApplyModOptions(options)
+	local min, max
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() min, max = AimRange(ow) end },
+		{ at = 300, run = PressEndTurn },
+	})
+	ApplyModOptions({})
+	Rat_KillzoneAim = nil
+	return min, max, targets, mover
+end
+
+t.case("Free aim: Killzone with a GBO 4 ladder value of 3 gives a minimum of 3", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local min, max, targets, mover = KillzoneAimRange(ow, 3, { IOSFreeAim = "1" })
+	t.eq(min, 3)
+	t.eq(max, 10)
+	t.eq(targets[1], mover)
+end)
+
+t.case("Free aim: an error in the GBO 4 Killzone ladder is logged, and the next shot still gets the ladder value", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local mover, _, dummies = WalkingMover(10)
+	local calls = 0
+	Rat_KillzoneAim = function()
+		calls = calls + 1
+		if calls == 1 then error("ladder broken") end
+		return 3
+	end
+	ApplyModOptions({ IOS = true, IOSFreeAim = "1" })
+	local first_min, second_min
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			first_min = AimRange(ow)
+			second_min = AimRange(ow)
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	ApplyModOptions({})
+	Rat_KillzoneAim = nil
+	t.eq(first_min, 0)
+	t.eq(LogHas("aim range failed: .*ladder broken"), true)
+	t.eq(second_min, 3)
+end)
+
+t.case("Free aim: under GBO 4, the option value applies when it is higher than the Killzone ladder value", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	t.eq(KillzoneAimRange(ow, 1, { IOSFreeAim = "2" }), 2)
+end)
+
+t.case("Free aim: under GBO 4, the Killzone ladder gets the target of the shot when it is a unit", function()
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	local other = FakeUnit({ id = "b", team = enemy_team })
+	local mover, _, dummies = WalkingMover(10)
+	local targets = {}
+	Rat_KillzoneAim = FakeKillzoneAim({ [mover] = 3, [other] = 2 }, targets)
+	ApplyModOptions({ IOS = true, IOSFreeAim = "0" })
+	local other_min, weapon_min
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function()
+			other_min = Unit.GetBaseAimLevelRange(ow, aim_action, other)
+			weapon_min = Unit.GetBaseAimLevelRange(ow, aim_action, { kinds = { Firearm = true } })
+		end },
+		{ at = 300, run = PressEndTurn },
+	})
+	ApplyModOptions({})
+	Rat_KillzoneAim = nil
+	t.eq(other_min, 2)
+	t.eq(weapon_min, 3)
+end)
+
+-- Runs OverwatcherAimRange for an overwatcher with the Killzone perk and no GBO 4.
+local function VanillaKillzoneAimRange(options)
+	local ow = Overwatcher{}
+	local perk = E.Perk
+	E.Perk = function(u, id) return u == ow and id == "Killzone" end
+	local min, max = OverwatcherAimRange(ow, options)
+	E.Perk = perk
+	return min, max
+end
+
+t.case("Free aim: Killzone without GBO 4 gives 1 level, and the option value when it is higher", function()
+	t.eq(VanillaKillzoneAimRange({ IOSFreeAim = "0" }), 1)
+	t.eq(VanillaKillzoneAimRange({ IOSFreeAim = "2" }), 2)
 end)

@@ -29,6 +29,7 @@ IIS.Config = {
 	ios_actions = "shot",        -- "shot": an overwatcher can only shoot in its cone or reload; "any": any action (IOS.lua)
 	ios_aim_limit = 100,         -- percent of the maximum aim levels that an overwatcher can use (Aim.lua)
 	interrupt_aim_limit = 100,   -- the same for a winner or a joiner of an IIS or JA2 Classic interrupt
+	ios_free_aim = 1,            -- the minimum aim level of an overwatcher's shot, at no AP cost (IOS.lua)
 }
 
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
@@ -65,6 +66,7 @@ local function ApplyOptions()
 	cfg.ios_actions = o.IOSActions == "Any action" and "any" or "shot"
 	cfg.ios_aim_limit = AimLimitOption(o.IOSAimLimit)
 	cfg.interrupt_aim_limit = AimLimitOption(o.InterruptAimLimit)
+	cfg.ios_free_aim = tonumber(o.IOSFreeAim) or 1
 end
 ApplyOptions()
 
@@ -1035,10 +1037,11 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s",
+	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s ios_free_aim=%s",
 		why, c.system, tostring(c.collective), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
 		tostring(c.moving_target_penalty),
-		tostring(c.log_checks), tostring(c.ios), c.ios_actions, tostring(c.ios_aim_limit), tostring(c.interrupt_aim_limit))
+		tostring(c.log_checks), tostring(c.ios), c.ios_actions, tostring(c.ios_aim_limit), tostring(c.interrupt_aim_limit),
+		tostring(c.ios_free_aim))
 end
 
 IIS.check_hook = Unit.CheckProvokeOpportunityAttacks
