@@ -431,6 +431,10 @@ local function Start(mover, entries, entry_type, handler)
 		Log("interrupt skipped: mover %s is gone", Name(mover))
 		return
 	end
+	if mover:IsIncapacitated() then
+		Log("interrupt skipped: mover %s cannot act", Name(mover))
+		return
+	end
 	local n = interrupt_count + 1
 	local ok, req = SafeCall(nil, entry_type .. " handler", handler, mover, entries[1], n, entries)
 	if not ok or not req then return end
