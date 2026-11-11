@@ -11,7 +11,7 @@ The mod keeps its name, "Improved Interrupt System". The mod description must na
 
 Release as a beta when all of these are done.
 
-- [ ] Save and load after a combat with interrupts. The IIS counters are in the save, so each update must load older saves.
+- [ ] Save and load after a combat with interrupts. Older saves load safely, but a load in combat clears the IIS counters (#41), and a load during an interrupt can leave the interrupt active (#42). See [save and load research](docs/research/save-load.md).
 - [ ] Play several full combats in a campaign, not only in the mod editor.
 - [ ] Decide how often interrupts must happen, and set the defaults (#2).
 - [ ] Add enemy interrupts. See [Enemy interrupts](#enemy-interrupts).
