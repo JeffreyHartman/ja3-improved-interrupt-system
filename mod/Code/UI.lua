@@ -60,12 +60,15 @@ function UI.EnsureBannerPreset()
 	return ok
 end
 
+-- The banner text of the active interrupt, or nil for the text of the preset.
+local banner_text
+
 -- Returns true when the banner shows.
 function UI.ShowBanner()
 	if not UI.EnsureBannerPreset() then
 		return false
 	end
-	ShowTacticalNotification(banner_id, true)
+	ShowTacticalNotification(banner_id, true, banner_text)
 	return true
 end
 
@@ -204,8 +207,10 @@ end
 ------------------------------------------------------------------------------------------------
 -- Calls from Control.lua
 
-function UI.Begin(it)
+--- Shows the interrupt. With a `banner` label, the banner says "<banner>: <interrupter names>".
+function UI.Begin(it, banner)
 	local safe = IIS.SafeCall
+	banner_text = banner and Untranslated(banner .. ": " .. NamesText(it:Interrupters())) or nil
 	local banner_shown = false
 	safe(it, "UI banner", function()
 		banner_shown = UI.ShowBanner()

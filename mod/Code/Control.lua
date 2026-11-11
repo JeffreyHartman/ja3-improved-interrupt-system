@@ -1,5 +1,5 @@
 -- Improved Interrupt System: runs an interrupt. The wrapper of
--- Unit:ProvokeOpportunityAttacksFromList passes each entry to the handler of its entry type, and
+-- Unit:ProvokeOpportunityAttacksFromList passes the entries to the handler of their entry type, and
 -- the frozen enemy's command thread waits in it while the interrupters take orders. End Turn
 -- (Enter) ends the interrupt. The overrides at the end of the file change behavior only while an
 -- interrupt is active.
@@ -39,21 +39,37 @@ function IISControl.Setup(o)
 	sleep, can_yield = o.sleep, o.can_yield
 end
 
--- The engine state that the last interrupt took and EndInterrupt gives back, and the counters for
--- its END log line. IISControl.Activate replaces both at the start of each interrupt.
-local taken, counters
+-- The engine state that the last interrupt took and EndInterrupt gives back, the counters for its
+-- END log line, the handler's request, and the IDs of the actions that each interrupter started.
+-- IISControl.Activate replaces them at the start of each interrupt.
+local taken, counters, request, started
+
+--- Returns the handler's request of the active interrupt, or nil when no interrupt is active.
+function IISControl.Request()
+	return active and request or nil
+end
 
 --- Makes `it` the active interrupt and returns two new tables for it: the engine state that the
 -- takeover list takes, and the counters for the END log line.
--- `dummy` is the step of the mover's path where the interrupt caught it, or nil.
-function IISControl.Activate(it, dummy)
-	taken = { dummy = dummy }
+-- `dummy` is the step of the mover's path where the interrupt caught it, or nil. `req` is the
+-- handler's request, or nil. `ap_before` holds the raw AP that each granted interrupter had before
+-- its grant, or is nil when no interrupter has a grant.
+function IISControl.Activate(it, dummy, req, ap_before)
+	taken = { dummy = dummy, ap_before = ap_before or {} }
 	counters = { start_time = GameTime(), start_ap = {}, forced = {} }
+	request = req or empty_table
+	started = {}
 	for _, m in ipairs(it:Interrupters()) do
 		counters.start_ap[m] = E.APRaw(m)
 	end
 	active = it
 	return taken, counters
+end
+
+-- Writes ActionPoints directly, because Unit:GainAP does nothing for a unit on Overwatch.
+local function SetAP(u, raw)
+	u.ActionPoints = raw + (u.free_move_ap or 0)
+	ObjModified(u)
 end
 
 local function Forced(what)
@@ -308,16 +324,35 @@ end
 
 local handlers = {}
 
+--- The entry type that the provoke-list wrapper gives to an entry whose handler took it. Vanilla
+-- ignores this type, but it still adds the entry to the mover's passed_interrupts.
+IISControl.HANDLED = "iis_handled"
+
 --- Sets the handler for the provoke-list entries of type `entry_type`, or removes it when
 -- `handler` is nil.
--- The provoke-list wrapper calls `handler(mover, entry, n)` after its own checks pass. `n` is the
--- number that the interrupt gets if it starts. The handler returns nil to start no interrupt, or
--- a request with these fields:
---   `interrupters`: the units that act, the top interrupter first
+-- The provoke-list wrapper calls `handler(mover, entry, n, entries)` after its own checks pass.
+-- `entries` holds all entries of this type on one step (entry[4]) in list order, and `entry` is
+-- the first of them. `n` is the number that the interrupt gets if it starts. The handler returns
+-- nil to start no interrupt, or a request with these fields:
+--   `interrupters`: the units that act, the top interrupter first. The handler takes each entry
+--     whose unit (entry[2]) is an interrupter, and the wrapper changes its type to
+--     IISControl.HANDLED.
 --   `dummy`: the step of the mover's path where the interrupt caught it, or nil
 --   `stop`: true to stop the mover at `dummy` when the interrupt ends
 --   `label`, `where`: the text of the BEGIN log line before and after the mover's state
 --   `notes`: an optional text for each interrupter, at the end of its interrupter log line
+--   `banner`: optional, the banner shows "<banner>: <interrupter names>" in place of "INTERRUPT!"
+--   `ap_grants`: an optional raw AP for each interrupter. The interrupter's AP is the grant during
+--     the interrupt, and its old AP again after it.
+--   `on_end(ap_left, started)`: optional, called at the end with the raw AP that each granted
+--     interrupter had left, and the list of the action IDs that each interrupter started, in
+--     order. A queued action that never started is not in the list.
+--   `action_limits`: an optional `limit(action_id, target)` for each interrupter. The interrupter
+--     can start an action only when its limit returns true.
+--   `aim_limit`: optional, the percent of its maximum aim level that each interrupter can use
+--     (Aim.lua)
+--   `free_aim(unit, action, target)`: optional, the number of aim levels that the minimum aim
+--     level of each interrupter's shot is at least. These levels cost no AP (Aim.lua).
 function IISControl.Handle(entry_type, handler)
 	handlers[entry_type] = handler
 end
@@ -330,13 +365,21 @@ local function Run(mover, req, n)
 	Log("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s in_command_thread=%s", n, req.label, Name(mover), Pos(mover),
 		AP(mover), req.where or "", tostring(in_cmd))
 	local notes = req.notes or empty_table
+	local grants = req.ap_grants or empty_table
+	local ap_before = {}
 	for i, m in ipairs(it:Interrupters()) do
 		local free = 0
 		SafeCall(nil, "RemoveFreeMove", function()
 			free = IISControl.RemoveFreeMove(m)
 		end)
 		local free_mark = free > 0 and string.format(" (free move %s removed)", IIS.FormatAP(free)) or ""
-		Log("INT #%d   interrupter %d: %s ap=%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark)
+		local grant_mark = ""
+		if grants[m] then
+			ap_before[m] = E.APRaw(m)
+			SafeCall(nil, "AP grant", SetAP, m, grants[m])
+			grant_mark = string.format(" (granted, %s before)", IIS.FormatAP(ap_before[m]))
+		end
+		Log("INT #%d   interrupter %d: %s ap=%s%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark, grant_mark)
 	end
 	SafeCall(nil, "before log", function()
 		Log("INT #%d before: %s | ai_controller=%s awareness_pending=%s | %s", n, UIState(it),
@@ -347,9 +390,9 @@ local function Run(mover, req, n)
 	-- InterruptBegin sets 3% animation speed for the overwatch slow motion. Hit reactions on the
 	-- frozen enemy would then play 33 times slower.
 	mover:SetAnimSpeedModifier(1000)
-	local state = IISControl.Activate(it, req.dummy)
+	local state = IISControl.Activate(it, req.dummy, req, ap_before)
 	TakeEngine(it, state)
-	SafeCall(it, "UI.Begin", IIS.UI.Begin, it)
+	SafeCall(it, "UI.Begin", IIS.UI.Begin, it, req.banner)
 	SafeCall(it, "control log", function()
 		Log("INT #%d control given: %s", n, UIState(it))
 	end)
@@ -386,7 +429,7 @@ local function Run(mover, req, n)
 	end
 end
 
-local function Start(mover, entry, handler)
+local function Start(mover, entries, entry_type, handler)
 	if not can_yield() then
 		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
 		return
@@ -399,24 +442,62 @@ local function Start(mover, entry, handler)
 		Log("interrupt skipped: mover %s is gone", Name(mover))
 		return
 	end
+	if mover:IsIncapacitated() then
+		Log("interrupt skipped: mover %s cannot act", Name(mover))
+		return
+	end
 	local n = interrupt_count + 1
-	local req = handler(mover, entry, n)
-	if not req then return end
+	local ok, req = SafeCall(nil, entry_type .. " handler", handler, mover, entries[1], n, entries)
+	if not ok or not req then return end
+	for _, entry in ipairs(entries) do
+		if table.find(req.interrupters, entry[2]) then
+			entry[1] = IISControl.HANDLED
+		end
+	end
 	interrupt_count = n
 	Run(mover, req, n)
 end
 
-local orig_ProvokeOpportunityAttacksFromList = Unit.ProvokeOpportunityAttacksFromList
-function Unit:ProvokeOpportunityAttacksFromList(list, ...)
-	local ours = false
-	for _, entry in ipairs(list or empty_table) do
-		local handler = handlers[entry[1]]
-		if handler then
-			ours = true
-			Start(self, entry, handler)
+-- The entry types in the order that their handlers run. Other types run after them, in list order.
+local type_order = { overwatch = 1, iis = 2 }
+
+-- Returns the entries of `list` that have a handler, in groups of one entry type and one step
+-- (entry[4]). The groups are sorted by type_order and then by list order.
+local function HandledGroups(list)
+	local groups = {}
+	for i, entry in ipairs(list or empty_table) do
+		local entry_type = entry[1]
+		if handlers[entry_type] then
+			local group
+			for _, g in ipairs(groups) do
+				if g.type == entry_type and rawequal(g.step, entry[4]) then
+					group = g
+					break
+				end
+			end
+			if not group then
+				group = { type = entry_type, step = entry[4], rank = type_order[entry_type] or math.huge, i = i }
+				groups[#groups + 1] = group
+			end
+			group[#group + 1] = entry
 		end
 	end
-	-- Vanilla ignores the "iis" entry type, adds it to passed_interrupts and ends the interrupt.
+	table.sort(groups, function(x, y)
+		if x.rank ~= y.rank then return x.rank < y.rank end
+		return x.i < y.i
+	end)
+	return groups
+end
+
+local orig_ProvokeOpportunityAttacksFromList = Unit.ProvokeOpportunityAttacksFromList
+function Unit:ProvokeOpportunityAttacksFromList(list, ...)
+	local groups = HandledGroups(list)
+	local ours = #groups > 0
+	for _, group in ipairs(groups) do
+		Start(self, group, group.type, handlers[group.type])
+	end
+	-- Vanilla ignores the "iis" and HANDLED entry types, adds them to passed_interrupts and ends the
+	-- interrupt.
 	local result = orig_ProvokeOpportunityAttacksFromList(self, list, ...)
 	if ours then
 		Log("provoke list done: mover=%s interrupted=%s stopped=%s pos=%s ap=%s", Name(self), tostring(self.interrupted),
@@ -457,12 +538,17 @@ function IISControl.EndInterrupt(it, reason)
 	active = false
 	local n, counters = it:Number(), counters
 
-	-- Queued actions that never started already paid their AP.
+	-- Queued actions that never started already paid their AP. A granted interrupter can be on
+	-- Overwatch, where GainAP does nothing.
 	for _, e in ipairs(it:Drain()) do
 		SafeCall(it, "refund", function()
 			local action_id, unit, ap = e.action_id, e.unit, e.ap
 			if IsValid(unit) and (ap or 0) > 0 then
-				unit:GainAP(ap)
+				if taken.ap_before[unit] then
+					SetAP(unit, E.APRaw(unit) + ap)
+				else
+					unit:GainAP(ap)
+				end
 			end
 			Log("INT #%d dropped queued action %s of %s, refunded %s raw AP", n, tostring(action_id), Name(unit), tostring(ap))
 		end)
@@ -485,6 +571,17 @@ function IISControl.EndInterrupt(it, reason)
 	SafeCall(it, "after log", function()
 		Log("INT #%d after end: %s | %s", n, UIState(it), RunningStateSnapshot())
 	end)
+
+	local ap_left = {}
+	for m, before in pairs(taken.ap_before) do
+		if IsValid(m) then
+			ap_left[m] = E.APRaw(m)
+			SafeCall(it, "AP grant give-back", SetAP, m, before)
+		end
+	end
+	if request.on_end then
+		SafeCall(it, "on_end", request.on_end, ap_left, started)
+	end
 end
 
 -- The enemy stays on the tile where the interrupt caught it and gets back the AP for the rest of
@@ -554,6 +651,8 @@ function IIS.RunMercAction(it, action_id, unit, ap, ...)
 	local count = it:ActionStarted()
 	Log("INT #%d run action #%d %s merc=%s cost=%s ap_left=%s | %s", it:Number(), count, tostring(action_id), Name(unit),
 		IIS.FormatAP(ap), AP(unit), RunningStateSnapshot())
+	started[unit] = started[unit] or {}
+	table.insert(started[unit], action_id)
 	g_Combat:SetActiveUnit(unit)
 	RunCombatAction(action_id, unit, ap, ...)
 end
@@ -649,6 +748,20 @@ function StartCombatAction(action_id, unit, ap, ...)
 	local it = active
 	if not (it and g_Combat and it:IsInterrupter(unit)) then
 		return orig_StartCombatAction(action_id, unit, ap, ...)
+	end
+	local limit = (request.action_limits or empty_table)[unit]
+	if limit then
+		local args = ...
+		local target = type(args) == "table" and args.target or nil
+		local ok, allowed = SafeCall(it, "action limit", limit, action_id, target)
+		if not (ok and allowed) then
+			Log("INT #%d %s of %s refused by the action limit", it:Number(), tostring(action_id), Name(unit))
+			local canceled = rawget(_G, "ActionCanceled")
+			if canceled then
+				SafeCall(it, "ActionCanceled", canceled, action_id, unit)
+			end
+			return
+		end
 	end
 	unit:ConsumeAP(ap, action_id, ...)
 	local action = CombatActions[action_id]

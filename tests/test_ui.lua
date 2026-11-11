@@ -51,3 +51,19 @@ t.case("UI.End: the combat log text is the same for every end reason", function(
 	IIS.UI.End(IISInterrupt.Begin{ n = 1, mover = {}, interrupters = {}, cfg = IIS.Config })
 	t.eq(combat_log[1], "Interrupt over.")
 end)
+
+t.case("UI.Begin: a request banner shows its label and the interrupter names in place of INTERRUPT!", function()
+	local shown = {}
+	Presets = { TacticalNotification = { Default = { iisInterrupt = true } } }
+	function ShowTacticalNotification(id, keep, text) shown[#shown + 1] = text or "preset" end
+	local it = IISInterrupt.Begin{ n = 1, mover = { GetLogName = function() return "Legion Goon" end },
+		interrupters = { Merc("Pie") }, cfg = IIS.Config }
+	IIS.UI.Begin(it, "Overwatch")
+	IIS.UI.Begin(it)
+	IIS.UI.Begin(IISInterrupt.Begin{ n = 2, mover = { GetLogName = function() return "Legion Goon" end },
+		interrupters = { Merc("Pie"), Merc("Livewire") }, cfg = IIS.Config }, "Overwatch")
+	Presets, ShowTacticalNotification = nil, nil
+	t.eq(shown[1], "Overwatch: Pie")
+	t.eq(shown[2], "preset")
+	t.eq(shown[3], "Overwatch: Pie and Livewire")
+end)
