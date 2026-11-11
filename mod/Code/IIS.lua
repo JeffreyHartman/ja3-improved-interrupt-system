@@ -197,12 +197,25 @@ function E.WalkRaw()
 	return const["Action Point Costs"].Walk
 end
 
+function E.CombatTurn()
+	return g_Combat and g_Combat.current_turn
+end
+
+-- The combat turn when each unit last logged a failed attack cost lookup.
+local cost_error_turn = setmetatable({}, { __mode = "k" })
+
 function E.AttackCostRaw(unit)
 	local ok, cost = pcall(function()
 		local action = unit:GetDefaultAttackAction()
 		return action and action:GetAPCost(unit) or -1
 	end)
-	return ok and cost or -1
+	if ok then return cost end
+	local turn = E.CombatTurn()
+	if cost_error_turn[unit] ~= turn then
+		cost_error_turn[unit] = turn
+		Log("attack cost lookup failed for %s: %s", Name(unit), tostring(cost))
+	end
+	return -1
 end
 
 function E.Overwatch(unit)
@@ -429,7 +442,8 @@ function IIS.WinSkipReason(w, system)
 	if ap < min then return "AP below minimum" end
 	-- A winner needs the AP for its default attack (TeamTurns.cpp:877).
 	local cost = E.AttackCostRaw(w)
-	if cost < 0 or ap < cost then return "AP below attack cost" end
+	if cost < 0 then return "attack cost unknown" end
+	if ap < cost then return "AP below attack cost" end
 	if system == "JA2 Classic" then
 		if E.Status(w, "Choking") then return "gassed" end
 		if E.Status(w, "Suppressed") then return "under fire" end

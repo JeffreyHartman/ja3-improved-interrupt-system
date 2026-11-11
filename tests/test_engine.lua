@@ -309,6 +309,7 @@ E.IsAITurnEnemy = function(u) return u.team.control ~= "UI" end
 E.MaxAPRaw = function(u) return u.max_ap end
 E.StepRaw = function(stance) return stance == "Crouch" and 1500 or 1000 end
 E.WalkRaw = function() return 1000 end
+local real_attack_cost_raw = E.AttackCostRaw
 E.AttackCostRaw = function(u) return u.attack_cost end
 E.Status = function(u, id) return u.statuses[id] or false end
 E.Perk = function() return false end
@@ -597,6 +598,49 @@ t.case("WinSkipReason: AP minimum, attack cost and blocking statuses", function(
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Suppressed = true } }), "JA2 Classic"), "under fire")
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Suppressed = true } }), "IIS"), nil)
 	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", statuses = { Choking = true } }), "JA2 Classic"), "gassed")
+end)
+
+t.case("AttackCostRaw: a lookup error writes one log line with the error and the unit, and returns -1", function()
+	ResetWorld()
+	g_Combat.current_turn = 3
+	local u = FakeUnit({ id = "err" })
+	function u:GetDefaultAttackAction() error("no weapon table") end
+	local before = #log_lines
+	t.eq(real_attack_cost_raw(u), -1)
+	t.eq(#log_lines, before + 1)
+	t.eq(log_lines[#log_lines]:find("no weapon table", 1, true) ~= nil, true)
+	t.eq(log_lines[#log_lines]:find("err#err", 1, true) ~= nil, true)
+end)
+
+t.case("AttackCostRaw: a unit logs its lookup error once per combat turn", function()
+	ResetWorld()
+	g_Combat.current_turn = 4
+	local u = FakeUnit({ id = "again" })
+	function u:GetDefaultAttackAction() error("broken") end
+	local before = #log_lines
+	real_attack_cost_raw(u)
+	t.eq(real_attack_cost_raw(u), -1)
+	t.eq(#log_lines, before + 1)
+	g_Combat.current_turn = 5
+	real_attack_cost_raw(u)
+	t.eq(#log_lines, before + 2)
+end)
+
+t.case("AttackCostRaw: a unit with no default attack action returns -1 and logs nothing", function()
+	ResetWorld()
+	local u = FakeUnit({ id = "unarmed" })
+	function u:GetDefaultAttackAction() return nil end
+	local before = #log_lines
+	t.eq(real_attack_cost_raw(u), -1)
+	t.eq(#log_lines, before)
+end)
+
+t.case("WinSkipReason: an unknown attack cost is not an AP shortage", function()
+	ResetWorld()
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 10000, attack_cost = -1 }), "IIS"), "attack cost unknown")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 10000, attack_cost = -1 }), "JA2 Classic"), "attack cost unknown")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 3000, attack_cost = 4000 }), "IIS"), "AP below attack cost")
+	t.eq(Q.WinSkipReason(FakeUnit({ id = "a", ap = 4000, attack_cost = 4000 }), "IIS"), nil)
 end)
 
 ------------------------------------------------------------------------------------------------

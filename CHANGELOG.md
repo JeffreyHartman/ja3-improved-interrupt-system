@@ -25,6 +25,7 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 - An error in a provoke-list handler is logged, and the enemy action continues with the vanilla interrupts.
 - A merc on Overwatch never wins an IIS or JA2 Classic interrupt (#17).
 - No interrupt starts on an enemy that is dead or downed (#30).
+- When the game cannot give a merc's attack cost, the log gives the error once per turn, and the check log gives the reason `attack cost unknown` in place of `AP below attack cost` (#38).
 
 ## 0.7.4 (build 11), not released
 
