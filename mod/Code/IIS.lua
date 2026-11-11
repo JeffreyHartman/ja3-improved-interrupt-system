@@ -9,7 +9,7 @@
 -- The wrapper of that function in Control.lua passes the entry to IIS.InterruptRequest.
 
 IIS = IIS or {}
-IIS.version = "0.7.3"
+IIS.version = "0.8.0"
 local R = IISRules
 local Mem = IISMemory
 
@@ -36,7 +36,7 @@ IIS.Config = {
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
 
 -- The game never removes a stored option that the mod no longer has, so "Enabled" and "System"
--- of version 0.7.3 and earlier stay in the storage. They are read only while "InterruptSystem" is not
+-- of version 0.7.4 and earlier stay in the storage. They are read only while "InterruptSystem" is not
 -- stored, so metadata.lua must not give "InterruptSystem" a default.
 local function InterruptSystemOption(o)
 	local value = rawget(o, "InterruptSystem")

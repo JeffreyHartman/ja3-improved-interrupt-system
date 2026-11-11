@@ -91,7 +91,7 @@ Each option has the color tag of its group in its display name:
 
 The tags are text styles of the game. GBO 4 and RatoAI use the same text styles for their option groups.
 
-The game does not remove a stored option value when the mod removes the option. Thus the values of version 0.7.3 and earlier stay in the storage:
+The game does not remove a stored option value when the mod removes the option. Thus the values of version 0.7.4 and earlier stay in the storage:
 
 - `Enabled = false` gives `InterruptSystem = "Off"`.
 - `System = "Classic"` gives `InterruptSystem = "JA2 Classic"`.

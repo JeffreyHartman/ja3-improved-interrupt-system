@@ -54,7 +54,7 @@ The options list shows each group of options in one color: one color for the Int
 | Moving target penalty | Both systems | 0 | A to-hit penalty for a shot in an interrupt at an enemy that moved across the line of fire. |
 | Verbose log | Both systems | off | Writes more detail to the game log. |
 
-A setting from version 0.7.3 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".
+A setting from version 0.7.4 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".
 
 ## Compatibility
 

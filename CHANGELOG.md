@@ -4,7 +4,7 @@ This file lists the changes in each version of the mod. The format follows [Keep
 
 A version is `version_major.version_minor` and a patch number. The game shows the build number, which is `version` in `mod/metadata.lua`. When you bump `version`, add a section here.
 
-## 0.7.4 (build 11), not released
+## 0.8.0 (build 12), not released
 
 ### Added
 
@@ -22,10 +22,16 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 - The "End interrupt at 0 AP" and "Need AP for an attack" options are removed. Their rules are always on (#28).
 - Each option has the color of its group in the options list (#28).
 - The mod description names IIS, JA2 Classic and IOS (#28).
+- An error in a provoke-list handler is logged, and the enemy action continues with the vanilla interrupts.
+- A merc on Overwatch never wins an IIS or JA2 Classic interrupt (#17).
+- No interrupt starts on an enemy that is dead or downed (#30).
+
+## 0.7.4 (build 11), not released
+
+### Changed
 
 - The code that runs an interrupt is in a new module, `IISControl`. Each entry type of the provoke list has a handler, and the 1.13 checks are the first handler. This prepares Improved Overwatch (#17). The game does not change (#19, #26).
 - The "Interrupted enemy" option is read when the interrupt begins. A change to the option during an interrupt has an effect only on the next interrupt.
-- An error in a provoke-list handler is logged, and the enemy action continues with the vanilla interrupts.
 
 ### Fixed
 

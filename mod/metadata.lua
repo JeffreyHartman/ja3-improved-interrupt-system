@@ -4,8 +4,8 @@ return PlaceObj('ModDef', {
 	'id', "ImprovedInterruptSystem",
 	'author', "jeff",
 	'version_major', 0,
-	'version_minor', 7,
-	'version', 11,
+	'version_minor', 8,
+	'version', 12,
 	'lua_revision', 233360,
 	'saved_with_revision', 366685,
 	'code', {
