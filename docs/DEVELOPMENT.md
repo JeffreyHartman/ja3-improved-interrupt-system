@@ -141,6 +141,7 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 | `attack args hook: ours` | `IOS.lua` wrapped `Unit:PrepareAttackArgs` on `ModsReloaded`. `REPLACED` means that another mod replaced the wrap. |
 | `aim range hook: ours` | `Aim.lua` wrapped `Unit:GetBaseAimLevelRange` on `ModsReloaded`. `REPLACED` means that another mod replaced the wrap. |
 | `INT #N aim range failed` | The free aim levels or the aim limit failed with a Lua error. The shot gets the aim range of the game. |
+| `attack cost lookup failed for` | The game call for the default attack cost of a unit failed with a Lua error. Each unit writes this line once per combat turn. The unit cannot win an IIS or JA2 Classic interrupt (`attack cost unknown`). |
 | `INT #- <type> handler failed` | A provoke-list handler failed. Vanilla gets the entries of that group. |
 | `INT #N collective` | A collective interrupt roll, or the reason that a teammate did not roll. |
 | `INT #N run action`, `action ended` | An interrupter action started or ended. |

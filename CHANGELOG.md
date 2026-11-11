@@ -4,6 +4,12 @@ This file lists the changes in each version of the mod. The format follows [Keep
 
 A version is `version_major.version_minor` and a patch number. The game shows the build number, which is `version` in `mod/metadata.lua`. When you bump `version`, add a section here.
 
+## 0.8.1 (build 13), not released
+
+### Fixed
+
+- When the game cannot give a unit's attack cost, the log gives the error. Each unit writes this line once per combat turn. The skip reason is then `attack cost unknown`, not `AP below attack cost` (#38).
+
 ## 0.8.0 (build 12), not released
 
 ### Added

@@ -9,7 +9,7 @@
 -- The wrapper of that function in Control.lua passes the entry to IIS.InterruptRequest.
 
 IIS = IIS or {}
-IIS.version = "0.8.0"
+IIS.version = "0.8.1"
 local R = IISRules
 local Mem = IISMemory
 
@@ -197,12 +197,27 @@ function E.WalkRaw()
 	return const["Action Point Costs"].Walk
 end
 
+function E.CombatTurn()
+	return g_Combat and g_Combat.current_turn
+end
+
+-- The combat and the combat turn when each unit last logged a failed attack cost lookup. Turn
+-- numbers start again in each combat, and outside combat the combat and the turn are false.
+local cost_error_logged = setmetatable({}, { __mode = "k" })
+
 function E.AttackCostRaw(unit)
 	local ok, cost = pcall(function()
 		local action = unit:GetDefaultAttackAction()
 		return action and action:GetAPCost(unit) or -1
 	end)
-	return ok and cost or -1
+	if ok then return cost end
+	local combat, turn = g_Combat or false, E.CombatTurn() or false
+	local last = cost_error_logged[unit]
+	if not last or last.combat ~= combat or last.turn ~= turn then
+		cost_error_logged[unit] = { combat = combat, turn = turn }
+		Log("attack cost lookup failed for %s: %s", Name(unit), tostring(cost))
+	end
+	return -1
 end
 
 function E.Overwatch(unit)
@@ -429,7 +444,8 @@ function IIS.WinSkipReason(w, system)
 	if ap < min then return "AP below minimum" end
 	-- A winner needs the AP for its default attack (TeamTurns.cpp:877).
 	local cost = E.AttackCostRaw(w)
-	if cost < 0 or ap < cost then return "AP below attack cost" end
+	if cost < 0 then return "attack cost unknown" end
+	if ap < cost then return "AP below attack cost" end
 	if system == "JA2 Classic" then
 		if E.Status(w, "Choking") then return "gassed" end
 		if E.Status(w, "Suppressed") then return "under fire" end

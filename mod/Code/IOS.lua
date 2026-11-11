@@ -10,10 +10,6 @@ local Log, Name, FormatAP = IIS.Log, IIS.Name, IIS.FormatAP
 -- The number of the last interrupt that IOS.InterruptRequest asked for.
 local ios_interrupt
 
-function E.CombatTurn()
-	return g_Combat and g_Combat.current_turn
-end
-
 -- `target` must be a unit. With the mode "overwatch", Unit:IsThreatened is also true only when
 -- `unit` can see `target`.
 function E.InOverwatchCone(unit, target)
