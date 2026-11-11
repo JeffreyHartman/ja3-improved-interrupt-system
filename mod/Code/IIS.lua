@@ -201,8 +201,9 @@ function E.CombatTurn()
 	return g_Combat and g_Combat.current_turn
 end
 
--- The combat turn when each unit last logged a failed attack cost lookup.
-local cost_error_turn = setmetatable({}, { __mode = "k" })
+-- The combat and the combat turn when each unit last logged a failed attack cost lookup. Turn
+-- numbers start again in each combat, and outside combat the combat and the turn are false.
+local cost_error_logged = setmetatable({}, { __mode = "k" })
 
 function E.AttackCostRaw(unit)
 	local ok, cost = pcall(function()
@@ -210,9 +211,10 @@ function E.AttackCostRaw(unit)
 		return action and action:GetAPCost(unit) or -1
 	end)
 	if ok then return cost end
-	local turn = E.CombatTurn()
-	if cost_error_turn[unit] ~= turn then
-		cost_error_turn[unit] = turn
+	local combat, turn = g_Combat or false, E.CombatTurn() or false
+	local last = cost_error_logged[unit]
+	if not last or last.combat ~= combat or last.turn ~= turn then
+		cost_error_logged[unit] = { combat = combat, turn = turn }
 		Log("attack cost lookup failed for %s: %s", Name(unit), tostring(cost))
 	end
 	return -1

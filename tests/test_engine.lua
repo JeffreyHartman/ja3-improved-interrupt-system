@@ -626,6 +626,24 @@ t.case("AttackCostRaw: a unit logs its lookup error once per combat turn", funct
 	t.eq(#log_lines, before + 2)
 end)
 
+t.case("AttackCostRaw: a lookup error outside combat and in a new combat writes a log line", function()
+	ResetWorld()
+	local u = FakeUnit({ id = "nocombat" })
+	function u:GetDefaultAttackAction() error("broken") end
+	local saved = g_Combat
+	g_Combat = nil
+	local before = #log_lines
+	real_attack_cost_raw(u)
+	local outside = #log_lines - before
+	g_Combat = { current_turn = 2 }
+	real_attack_cost_raw(u)
+	g_Combat = { current_turn = 2 }
+	real_attack_cost_raw(u)
+	g_Combat = saved
+	t.eq(outside, 1)
+	t.eq(#log_lines, before + 3)
+end)
+
 t.case("AttackCostRaw: a unit with no default attack action returns -1 and logs nothing", function()
 	ResetWorld()
 	local u = FakeUnit({ id = "unarmed" })
