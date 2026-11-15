@@ -904,7 +904,7 @@ end
 function OnMsg.DoneMap()
 	if active then
 		taken.map_done = true
-		IISControl.EndInterrupt(active, IIS.E.LoadingSave() and "load" or "map_change")
+		IISControl.EndInterrupt(active, E.LoadingSave() and "load" or "map_change")
 	end
 end
 
