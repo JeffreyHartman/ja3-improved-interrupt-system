@@ -3296,3 +3296,52 @@ t.case("Enemy interrupt: a joiner must pass the merc joiner checks and be on the
 	t.eq(LogHas("collective: e#e %-> tired#tired skipped: AP below minimum"), true)
 	t.eq(LogHas("collective: e#e %-> other#other skipped: other team"), true)
 end)
+
+t.case("Enemy interrupt: the aim range of the AI interrupter is limited by the Interrupt aim limit", function()
+	local merc, e, dummies = WalkingMerc(10)
+	e.max_aim = 10
+	ApplyModOptions({ InterruptAimLimit = "50%" })
+	FakeControl()
+	local min, max
+	world.ai_script = function()
+		min, max = AimRange(e)
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	ApplyModOptions({})
+	t.eq(#world.ai_runs, 1)
+	t.eq(min, 0)
+	t.eq(max, 5)
+	t.eq(select(2, AimRange(e)), 10)
+end)
+
+t.case("Enemy interrupt: the aim limit does not apply to an enemy that is not an interrupter, nor to the merc", function()
+	local merc, _, dummies = WalkingMerc(10)
+	merc.max_aim = 10
+	local other = FakeUnit({ id = "other", team = enemy_team })
+	other.max_aim = 10
+	ApplyModOptions({ InterruptAimLimit = "25%" })
+	FakeControl()
+	local other_max, merc_max
+	world.ai_script = function()
+		other_max = select(2, AimRange(other))
+		merc_max = select(2, AimRange(merc))
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	ApplyModOptions({})
+	t.eq(other_max, 10)
+	t.eq(merc_max, 10)
+end)
+
+t.case("Enemy interrupt: an enemy on vanilla Overwatch outside an enemy interrupt keeps its full aim range", function()
+	WalkingMerc(10)
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	ApplyModOptions({ InterruptAimLimit = "25%", IOSAimLimit = "25%" })
+	t.eq(IISControl.Active() and true or false, false)
+	local min, max = AimRange(ow)
+	ApplyModOptions({})
+	t.eq(min, 0)
+	t.eq(max, 10)
+end)
