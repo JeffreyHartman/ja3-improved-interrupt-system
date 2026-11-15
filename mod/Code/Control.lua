@@ -348,7 +348,8 @@ IISControl.HANDLED = "iis_handled"
 --     IISControl.HANDLED.
 --   `dummy`: the step of the mover's path where the interrupt caught it, or nil
 --   `enemy`: true for an Enemy interrupt. The mover is a merc, the vanilla AI plays the
---     interrupters in a new game-time thread, and the interrupt ends when the AI returns.
+--     interrupters in a new game-time thread, and the interrupt ends when the AI returns or
+--     after `enemy_ai_timeout_ms`. The wrapper calls the handler after the vanilla entries.
 --   `stop`: true to stop the mover at `dummy` when the interrupt ends, or at its start for an
 --     Enemy interrupt
 --   `label`, `where`: the text of the BEGIN log line before and after the mover's state
@@ -452,6 +453,22 @@ function IISControl.RunEnemyAI(it)
 	IISControl.EndInterrupt(it, "ai_done")
 end
 
+--- Ends the Enemy interrupt `it` with a stuck dump when its AI run in the thread `ai_thread` has not
+-- returned after `enemy_ai_timeout_ms` of game time. Called in its own game-time thread.
+function IISControl.WatchEnemyAI(it, ai_thread)
+	local elapsed = 0
+	while active == it do
+		if elapsed >= IIS.Config.enemy_ai_timeout_ms then
+			SafeCall(it, "DumpStuck", IIS.DumpStuck, it, string.format("the AI run did not return in %dms", elapsed))
+			SafeCall(it, "StopAI", E.StopAI, ai_thread)
+			IISControl.EndInterrupt(it, "ai_timeout")
+			return
+		end
+		sleep(100)
+		elapsed = elapsed + 100
+	end
+end
+
 -- Stops the merc on its step in its own command thread, so that its move ends, and starts the AI
 -- of the interrupters in a new thread.
 local function RunEnemy(mover, req, n)
@@ -470,7 +487,8 @@ local function RunEnemy(mover, req, n)
 	if req.stop then
 		SafeCall(it, "StopMover", IISControl.StopMover, it, req.dummy)
 	end
-	CreateGameTimeThread(IISControl.RunEnemyAI, it)
+	local ai_thread = CreateGameTimeThread(IISControl.RunEnemyAI, it)
+	CreateGameTimeThread(IISControl.WatchEnemyAI, it, ai_thread)
 end
 
 local function Start(mover, entries, entry_type, handler)
@@ -537,16 +555,28 @@ local function HandledGroups(list)
 	return groups
 end
 
+-- The entry types whose handlers run after the vanilla entries of the list. A vanilla Overwatch
+-- shot at a merc fires before an Enemy interrupt, and the interrupt starts only when the merc can
+-- still act.
+local after_vanilla = { iis_enemy = true }
+
 local orig_ProvokeOpportunityAttacksFromList = Unit.ProvokeOpportunityAttacksFromList
 function Unit:ProvokeOpportunityAttacksFromList(list, ...)
 	local groups = HandledGroups(list)
 	local ours = #groups > 0
 	for _, group in ipairs(groups) do
-		Start(self, group, group.type, handlers[group.type])
+		if not after_vanilla[group.type] then
+			Start(self, group, group.type, handlers[group.type])
+		end
 	end
-	-- Vanilla ignores the "iis" and HANDLED entry types, adds them to passed_interrupts and ends the
-	-- interrupt.
+	-- Vanilla ignores the "iis", "iis_enemy" and HANDLED entry types, adds them to passed_interrupts
+	-- and ends the interrupt.
 	local result = orig_ProvokeOpportunityAttacksFromList(self, list, ...)
+	for _, group in ipairs(groups) do
+		if after_vanilla[group.type] then
+			Start(self, group, group.type, handlers[group.type])
+		end
+	end
 	if ours then
 		Log("provoke list done: mover=%s interrupted=%s stopped=%s pos=%s ap=%s", Name(self), tostring(self.interrupted),
 			tostring(IISControl.IsStopped(self)), Pos(self), AP(self))

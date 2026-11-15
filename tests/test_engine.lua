@@ -87,11 +87,16 @@ function CreateGameTimeThread(f, ...)
 	threads_started[#threads_started + 1] = table.pack(f, ...)
 end
 
+-- Runs each started thread as a coroutine. A thread that yields stays suspended for good, as a hung
+-- game thread does.
 local function RunThreads()
 	local list = threads_started
 	threads_started = {}
 	for _, th in ipairs(list) do
-		th[1](table.unpack(th, 2, th.n))
+		local ok, err = coroutine.resume(coroutine.create(th[1]), table.unpack(th, 2, th.n))
+		if not ok then
+			error(err, 0)
+		end
 	end
 end
 
@@ -154,7 +159,7 @@ local function vanilla_prepare_attack_args(unit, action_id, args)
 	return attack_args
 end
 -- Like vanilla, the fake list function attacks for each "overwatch" entry and adds every entry to
--- the mover's passed_interrupts.
+-- the mover's passed_interrupts. It calls vanilla_result.on_attack(entry) at each attack.
 Unit = {
 	CheckProvokeOpportunityAttacks = function()
 		return vanilla_result.interrupts, vanilla_result.idx
@@ -164,6 +169,9 @@ Unit = {
 		for _, data in ipairs(list) do
 			if data[1] == "overwatch" then
 				vanilla_attacks[#vanilla_attacks + 1] = data[2]
+				if vanilla_result.on_attack then
+					vanilla_result.on_attack(data)
+				end
 			end
 			mover.passed_interrupts = mover.passed_interrupts or {}
 			table.insert(mover.passed_interrupts, data)
@@ -3246,4 +3254,89 @@ t.case("Enemy interrupt: no check of either side runs while it is active", funct
 	t.eq(lists.ai, nil)
 	t.eq(lists.merc, nil)
 	t.eq(Q.turn_stats.mover_skips["interrupt active"], 2)
+end)
+
+-- WalkingMerc with an enemy overwatcher whose vanilla Overwatch entry is on step 4, the step of
+-- the enemy interrupt. `on_shot(merc)` runs at the Overwatch shot.
+local function OverwatchOnTheStep(on_shot)
+	local merc, e, dummies = WalkingMerc(10)
+	local o = FakeUnit({ id = "o", team = enemy_team, pos = { x = 6, y = 0 } })
+	vanilla_result.interrupts, vanilla_result.idx = { { "overwatch", o, {}, dummies[4] } }, 4
+	local shot = {}
+	vanilla_result.on_attack = function()
+		shot.active, shot.path_nodes = IISControl.Active(), #merc.combat_path
+		if on_shot then on_shot(merc) end
+	end
+	FakeControl()
+	local list = MercMoves(merc, dummies)
+	return merc, e, dummies, list, shot, o
+end
+
+t.case("Enemy interrupt: a vanilla Overwatch entry on the same step fires before the enemy interrupt starts", function()
+	local merc, e, dummies, list, shot, o = OverwatchOnTheStep()
+	t.eq(#list, 2)
+	t.eq(vanilla_attacks[1], o)
+	t.eq(shot.active, false)
+	t.eq(shot.path_nodes, 3)
+	t.eq(#merc.combat_path, 1)
+	t.eq(merc.combat_path[1], dummies[4].pos)
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(world.ai_runs[1].units[1], e)
+	t.eq(IISControl.Active(), false)
+end)
+
+t.case("Enemy interrupt: a merc that the Overwatch shot downs gets no enemy interrupt", function()
+	local merc = OverwatchOnTheStep(function(m) m.down = true end)
+	RunThreads()
+	t.eq(#world.ai_runs, 0)
+	t.eq(IISControl.Active(), false)
+	t.eq(#merc.combat_path, 3)
+	t.eq(LogHas("interrupt skipped: mover merc#merc cannot act"), true)
+end)
+
+t.case("Enemy interrupt: a hung AI run ends at the time-out with a stuck dump, and player control comes back", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	local stopped = {}
+	local orig_stop = E.StopAI
+	E.StopAI = function() stopped[#stopped + 1] = IISControl.Active() end
+	world.ai_script = function() coroutine.yield() end
+	MercMoves(merc, dummies)
+	RunThreads()
+	E.StopAI = orig_stop
+	t.eq(#world.ai_runs, 1)
+	t.eq(game_time, Q.Config.enemy_ai_timeout_ms)
+	t.eq(LogHas("INT #%d+ STUCK%? the AI run did not return in %d+ms"), true)
+	t.eq(LogHas("INT #%d+ END %(ai_timeout%)"), true)
+	t.eq(#stopped, 1)
+	t.eq(IISControl.Active(), false)
+	t.eq(Unit.CanBeControlled(merc), "vanilla")
+	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
+	game_time = 0
+end)
+
+t.case("Enemy interrupt: CanSaveGameQuery blocks saves until the AI run returns", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	MercMoves(merc, dummies)
+	local during, after = {}, {}
+	OnMsg.CanSaveGameQuery(during)
+	RunThreads()
+	OnMsg.CanSaveGameQuery(after)
+	t.eq(during.iis_interrupt, true)
+	t.eq(after.iis_interrupt, nil)
+end)
+
+t.case("Enemy interrupt: a load before the AI run starts ends the interrupt, and the AI does not run", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	MercMoves(merc, dummies)
+	LoadMap(true)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("INT #%d+ END %(load%)"), true)
+	RunThreads()
+	t.eq(#world.ai_runs, 0)
+	t.eq(IISControl.Active(), false)
+	t.eq(game_time, 0)
 end)

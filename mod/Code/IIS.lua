@@ -26,6 +26,7 @@ IIS.Config = {
 	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
+	enemy_ai_timeout_ms = 45000, -- game time after which an Enemy interrupt whose AI run has not returned ends
 	ios = false,                 -- IOS: the Overwatch trigger of a merc starts an interrupt (IOS.lua)
 	ios_actions = "shot",        -- "shot": an overwatcher can only shoot in its cone or reload; "any": any action (IOS.lua)
 	ios_aim_limit = 100,         -- percent of the maximum aim levels that an overwatcher can use (Aim.lua)
@@ -202,6 +203,20 @@ function E.RunAI(units, camera_obj)
 	controller.restore_camera_obj = camera_obj
 	controller:Execute(units)
 	DoneObject(controller)
+end
+
+--- Stops an AI run that did not return: deletes its thread `thread`, removes the AI controller and
+-- gives control back to the player.
+function E.StopAI(thread)
+	if IsValidThread(thread) and thread ~= CurrentThread() then
+		DeleteThread(thread)
+	end
+	if g_AIExecutionController then
+		DoneObject(g_AIExecutionController)
+	end
+	if g_Combat and not g_Combat.is_player_control then
+		g_Combat:SetPlayerControl(true)
+	end
 end
 
 function E.IsAITurnEnemy(unit)
@@ -799,6 +814,12 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	else
 		-- AIExecutionController:SelectPlayingUnits runs the same check to group its units.
 		Log("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(mercs))
+	end
+	-- The provoke-list wrapper starts an Enemy interrupt after the vanilla entries (Control.lua).
+	if interrupts and provoke_idx == idx and enemy then
+		Log("check #%d   same step as vanilla %s, vanilla runs first", n, tostring(interrupts[1][1]))
+		interrupts[#interrupts + 1] = entry
+		return interrupts, provoke_idx
 	end
 	if interrupts and provoke_idx == idx then
 		table.insert(interrupts, 1, entry)
