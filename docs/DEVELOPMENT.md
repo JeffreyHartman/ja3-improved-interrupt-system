@@ -121,6 +121,8 @@ The tests do not cover the rest of `UI.lua` or anything that needs the game.
 
 `tools/deploy.sh` copies `mod/` to the game's Mods folder. `tools/log.sh -f` follows the game log. Both scripts have the paths of a Steam Proton install on Linux. Change the paths for your system.
 
+An agent drives the debug build with the `ja3-play` skill. `tools/wait-interrupt.sh` ends each player turn until an IIS interrupt starts. Its `-q` option quick saves at the start of each player turn, for a load test during an interrupt.
+
 For a quick combat test, open the Mod Editor from the main menu. Its Cheats menu has "Place test mercs" and "Spawn enemy". The in-game Esc menu then has Cheats, "Start Combat Now".
 
 ## Log
