@@ -306,6 +306,11 @@ function E.InCommandThread(unit)
 	return CurrentThread() == unit.command_thread
 end
 
+function E.LoadingSave()
+	local state = rawget(_G, "GameState")
+	return state and state.loading_savegame or false
+end
+
 function E.Rand(max)
 	return InteractionRand(max, "IIS")
 end
@@ -1000,7 +1005,6 @@ end
 -- counters and seen marks.
 function OnMsg.CombatStart(dynamic_data)
 	if dynamic_data then
-		IIS.attack_targets = {}
 		Log("combat state kept (CombatStart from a load)")
 	else
 		ResetCombatState("CombatStart")
@@ -1017,6 +1021,7 @@ end
 -- the map loads (GameSession.lua:602). It does not send LoadGame.
 function OnMsg.PreLoadSessionData()
 	Mem.Loaded()
+	IIS.attack_targets = {}
 	Log("load: move plans dropped, system=%s %s", IIS.Config.system, IIS.HookStatus())
 end
 

@@ -403,12 +403,14 @@ end
 t.case("A load drops the move plans", function()
 	local a, mover = SavedMemory()
 	local steps = PlannedMove(a, mover)
+	Q.attack_targets[mover] = { a }
 	OnMsg.PreLoadSessionData({})
+	t.eq(next(Q.attack_targets), nil)
 	t.eq(Mem.MoveDone(mover, steps[3]), nil)
 	t.eq(Mem.Counter(a, mover), 20)
 end)
 
-t.case("No handler for LoadGame remains, because JA3 does not send it", function()
+t.case("The mod has no LoadGame handler, because JA3 does not send it", function()
 	t.eq(msg_handlers.LoadGame, nil)
 end)
 
@@ -1334,18 +1336,33 @@ t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	t.eq(query.iis_interrupt, true)
 end)
 
+-- Sends DoneMap as the engine does when `loading` says that a save is being loaded.
+local function LoadMap(loading)
+	local orig = E.LoadingSave
+	E.LoadingSave = function() return loading end
+	OnMsg.DoneMap()
+	E.LoadingSave = orig
+end
+
 t.case("A load during an interrupt ends the interrupt and closes its UI", function()
 	ResetWorld()
 	log_lines = {}
 	local ui_ended
 	Q.UI = { End = function(it) ui_ended = it end }
 	local it = ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
-	GameState = { loading_savegame = true }
-	OnMsg.DoneMap()
-	GameState = nil
+	LoadMap(true)
 	t.eq(IISControl.Active(), false)
 	t.eq(ui_ended, it)
 	t.eq(LogHas("INT #1 END %(load%)"), true)
+end)
+
+t.case("A map change without a load during an interrupt ends it as a map change", function()
+	ResetWorld()
+	log_lines = {}
+	ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
+	LoadMap(false)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("INT #1 END %(map_change%)"), true)
 end)
 
 t.case("A map change with no interrupt active logs no interrupt end", function()
@@ -1585,10 +1602,8 @@ t.case("A Stop interrupt that a load ends does not stop the mover", function()
 	function mover:PopDestructor() pops = pops + 1 end
 	-- The map change runs in the thread of the load, not in the mover's command thread.
 	FakeControl({ { at = 200, run = function()
-		GameState = { loading_savegame = true }
 		mover.in_cmd = false
-		OnMsg.DoneMap()
-		GameState = nil
+		LoadMap(true)
 	end } })
 	local dummy = { pos = { x = 3, y = 0 }, valid = false }
 	IISControl.Handle("test", function()

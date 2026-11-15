@@ -12,8 +12,6 @@ IISControl = IISControl or {}
 
 local active = false
 local interrupt_count = 0
--- The interrupt that OnMsg.DoneMap ended. Its mover belongs to the old map.
-local map_ended
 
 --- Returns the active interrupt, or false when no interrupt is active.
 function IISControl.Active()
@@ -429,7 +427,7 @@ local function Run(mover, req, n)
 			end)
 		end
 	end
-	if req.stop and map_ended ~= it then
+	if req.stop and not state.map_done then
 		SafeCall(it, "StopMover", IISControl.StopMover, it, state.dummy)
 	end
 end
@@ -905,9 +903,8 @@ end
 -- never ends the interrupt.
 function OnMsg.DoneMap()
 	if active then
-		local loading = rawget(_G, "GameState") and GameState.loading_savegame
-		map_ended = active
-		IISControl.EndInterrupt(active, loading and "load" or "map_change")
+		taken.map_done = true
+		IISControl.EndInterrupt(active, IIS.E.LoadingSave() and "load" or "map_change")
 	end
 end
 
