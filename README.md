@@ -1,6 +1,6 @@
 # Improved Interrupt System
 
-A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the enemy turn, your mercs can interrupt the enemy. The enemy stops, and you give orders to the mercs that interrupted.
+A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the enemy turn, your mercs can interrupt the enemy. The enemy stops, and you give orders to the mercs that interrupted. During your turn, the enemy can interrupt your mercs.
 
 > **Status:** experimental. Interrupts change the game balance a lot, and bugs are possible.
 
@@ -8,7 +8,8 @@ A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the e
 
 - **IIS (1.13 default):** each merc registers part of the AP that a seen enemy spends. When the merc's counter reaches its reaction time, the merc interrupts.
 - **JA2 Classic:** when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins.
-- **Collective interrupts:** teammates near a winner can join the interrupt.
+- **Collective interrupts:** teammates near a winner can join the interrupt. A joiner must be on the team of the winner.
+- **Enemy interrupts:** when a merc moves or attacks in your turn, an enemy that sees it can interrupt. The merc stops, and the AI plays the enemies that won. An "Enemy Interrupt" banner shows while the AI plays. Then your merc stays selected, if it can still act. This works in IIS and JA2 Classic.
 - **Clear UI:** an INTERRUPT! banner shows at the top of the screen, and the other mercs' portraits are locked. End Turn ends the interrupt.
 - **Stop or continue:** the interrupted enemy stops on its tile and attacks from there, or it continues its move.
 - **Improved Overwatch System (IOS):** when an enemy moves or attacks in the Overwatch cone of a merc, the merc acts in an interrupt in place of the automatic Overwatch shot. The merc pays from the AP of its Overwatch attacks, and End Turn with no action costs nothing. IOS is a separate option, and it works with or without the 1.13 interrupts.
@@ -26,6 +27,8 @@ The mod is not on the Steam Workshop yet.
 
 Play as usual. When a merc interrupts, you control only the mercs that interrupted. Press End Turn (Enter) to end the interrupt, and the enemy turn continues.
 
+When an enemy interrupts a merc, the merc stops on its tile and gets back the AP for the rest of its path. You cannot give orders or press End Turn until the AI is done. The AI has 45 seconds. After that, the interrupt ends and you get control. An enemy on Overwatch shoots first, and a merc that it downs gets no enemy interrupt. You cannot save during an enemy interrupt.
+
 A merc loses its Free Move AP when it enters an interrupt. The interrupt checks count only the AP that can pay for an attack.
 
 If a merc hangs during an action, press End Turn two times.
@@ -41,18 +44,18 @@ The options list shows each group of options in one color: one color for the Int
 | Option | Group | Default | Effect |
 |---|---|---|---|
 | Interrupt System (Experimental) | Interrupt System | IIS | IIS, JA2 Classic or Off. |
-| Collective interrupts (IIS) | Interrupt System | on | Teammates within 5 tiles of a winner can join. |
-| Enemy interrupts | Interrupt System | on | Enemies can interrupt a merc in your turn, with the same rules as mercs. The merc stops on its tile, and the AI plays the enemies that won. |
+| Collective interrupts (IIS) | Interrupt System | on | Teammates within 5 tiles of a winner can join. This applies to enemy interrupts too. |
+| Enemy interrupts | Interrupt System | on | Enemies can interrupt a merc in your turn, with the same rules as mercs. The merc stops on its tile, and the AI plays the enemies that won. This applies only to IIS and JA2 Classic. |
 | Interrupted enemy | Interrupt System | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
 | IIS reaction time | Interrupt System | 25 | Lower values give more interrupts. |
 | IIS AP registered (%) | Interrupt System | 60 | Higher values give more interrupts. |
-| Interrupt aim limit | Interrupt System | 100% | The part of the weapon's aim levels that a merc can use in an IIS or JA2 Classic interrupt, rounded up. |
+| Interrupt aim limit | Interrupt System | 100% | The part of the weapon's aim levels that a merc or an enemy can use in an IIS or JA2 Classic interrupt, rounded up. |
 | Improved Overwatch System (IOS) | IOS | off | The Overwatch trigger of a merc starts an interrupt in place of the Overwatch shot. |
 | IOS actions | IOS | Shot only | Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action. A move, a stance change or another action that is not an attack or a reload ends Overwatch. |
 | IOS aim limit | IOS | 100% | The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. |
 | IOS free aim levels | IOS | 1 | The minimum aim level of a merc's shot in an IOS interrupt. These levels cost no AP. Killzone gives at least 1. |
 | IOS full aim under GBO 4 | IOS | off | Under GBO 4 in old CTH mode, an IOS shot gets the full aim bonus in place of half. |
-| Moving target penalty | Both systems | 0 | A to-hit penalty for a shot in an interrupt at an enemy that moved across the line of fire. |
+| Moving target penalty | Both systems | 0 | A to-hit penalty for a shot in an interrupt at a unit that moved across the line of fire. It applies to enemy interrupters too. |
 | Verbose log | Both systems | off | Writes more detail to the game log. |
 
 A setting from version 0.7.4 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".
@@ -63,7 +66,6 @@ Made for vanilla JA3 and for Rato's Gameplay Balance and Overhaul 4. Co-op is no
 
 ## Not supported yet
 
-- Enemy interrupts during your turn
 - Militia interrupts
 - Counter-interrupts
 - Interrupts from noise
