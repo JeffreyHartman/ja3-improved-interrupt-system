@@ -12,6 +12,8 @@ IISControl = IISControl or {}
 
 local active = false
 local interrupt_count = 0
+-- The interrupt that OnMsg.DoneMap ended. Its mover belongs to the old map.
+local map_ended
 
 --- Returns the active interrupt, or false when no interrupt is active.
 function IISControl.Active()
@@ -189,9 +191,10 @@ end
 -- The begin runs the list from the top, and the end from the bottom.
 local takeover = {
 	{
-		-- PopDestructor must run in the mover's command thread, and every caller of EndInterrupt
-		-- runs there. The engine pops a destructor before it calls it, so the give-back pops only
-		-- when the destructor did not run.
+		-- PopDestructor must run in the mover's command thread. OnMsg.DoneMap ends the interrupt from
+		-- the thread of the map change, and then the destructor stays until the map deletes the
+		-- mover. The engine pops a destructor before it calls it, so the give-back pops only when
+		-- the destructor did not run.
 		take = function(it, state)
 			local mover = it:Mover()
 			if not E.InCommandThread(mover) then return end
@@ -204,8 +207,10 @@ local takeover = {
 		give_label = "pop destructor",
 		give = function(it, state)
 			if not state.destructor then return end
+			local mover = it:Mover()
+			if not E.InCommandThread(mover) then return end
 			state.destructor = false
-			it:Mover():PopDestructor()
+			mover:PopDestructor()
 		end,
 	},
 	{
@@ -424,7 +429,7 @@ local function Run(mover, req, n)
 			end)
 		end
 	end
-	if req.stop then
+	if req.stop and map_ended ~= it then
 		SafeCall(it, "StopMover", IISControl.StopMover, it, state.dummy)
 	end
 end
@@ -892,6 +897,17 @@ end
 function OnMsg.CanSaveGameQuery(query)
 	if active then
 		query.iis_interrupt = true
+	end
+end
+
+-- The player can load a save during an interrupt, because CanLoadGame does not send
+-- CanSaveGameQuery. The map change deletes the mover's command thread, so the wait loop in Run
+-- never ends the interrupt.
+function OnMsg.DoneMap()
+	if active then
+		local loading = rawget(_G, "GameState") and GameState.loading_savegame
+		map_ended = active
+		IISControl.EndInterrupt(active, loading and "load" or "map_change")
 	end
 end
 

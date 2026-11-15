@@ -1334,6 +1334,27 @@ t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	t.eq(query.iis_interrupt, true)
 end)
 
+t.case("A load during an interrupt ends the interrupt and closes its UI", function()
+	ResetWorld()
+	log_lines = {}
+	local ui_ended
+	Q.UI = { End = function(it) ui_ended = it end }
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
+	GameState = { loading_savegame = true }
+	OnMsg.DoneMap()
+	GameState = nil
+	t.eq(IISControl.Active(), false)
+	t.eq(ui_ended, it)
+	t.eq(LogHas("INT #1 END %(load%)"), true)
+end)
+
+t.case("A map change with no interrupt active logs no interrupt end", function()
+	ResetWorld()
+	log_lines = {}
+	OnMsg.DoneMap()
+	t.eq(LogHas("END"), false)
+end)
+
 ------------------------------------------------------------------------------------------------
 -- A full interrupt through the provoke-list wrapper
 
@@ -1557,6 +1578,30 @@ local function TestInterrupt(mover, a, script)
 	game_time = 0
 	return dummy
 end
+
+t.case("A Stop interrupt that a load ends does not stop the mover", function()
+	local mover, a = WalkingMover(10)
+	local pops = 0
+	function mover:PopDestructor() pops = pops + 1 end
+	-- The map change runs in the thread of the load, not in the mover's command thread.
+	FakeControl({ { at = 200, run = function()
+		GameState = { loading_savegame = true }
+		mover.in_cmd = false
+		OnMsg.DoneMap()
+		GameState = nil
+	end } })
+	local dummy = { pos = { x = 3, y = 0 }, valid = false }
+	IISControl.Handle("test", function()
+		return { interrupters = { a }, dummy = dummy, stop = true, label = "Test move" }
+	end)
+	Unit.ProvokeOpportunityAttacksFromList(mover, { { "test", a, nil, dummy } })
+	IISControl.Handle("test", nil)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("END %(load%)"), true)
+	t.eq(mover.combat_path[1], "dest")
+	t.eq(IISControl.IsStopped(mover), false)
+	t.eq(pops, 0)
+end)
 
 t.case("After an interrupt, the visibility override, the camera locks and the player control have their old values", function()
 	local mover, a = WalkingMover(10)

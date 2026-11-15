@@ -15,7 +15,8 @@ Paths:
 - A GameVar is in the save. A MapVar is not. `g_Overwatch` is a MapVar, so the game does not save it.
 - The game builds `g_Overwatch[unit]` again after a load, from the Overwatch command arguments of the unit. Mod fields on that entry are lost.
 - `OnMsg.LoadGame`, `PreLoadGame` and `PostLoadGame` do not fire in a JA3 load.
-- A load into a combat fires `CombatStart`. This mod clears `gv_IIS` on `CombatStart`, so the IIS counters do not survive a load.
+- A load into a combat fires `CombatStart` with the saved combat as its first argument. This mod keeps `gv_IIS` on that `CombatStart`, so the IIS counters and seen marks survive a load (#41).
+- A load during an interrupt ends the interrupt on `DoneMap` with the reason `load` (#42).
 
 ## Saved globals mechanism
 
@@ -98,7 +99,7 @@ This is the order of a load from the menu. Each step names the code that runs it
 Messages that do not fire in a JA3 load:
 - `PreLoadGame`, `LoadGame` and `PostLoadGame` fire only in `UnpersistGame`. `CommonLua/Savegame.lua:796-817`.
 - No JA3 code calls `UnpersistGame`. The only other mention is a comment. `CommonLua/Savegame.lua:56`.
-- The game log agrees. This mod logs `[IIS] LoadGame` in `OnMsg.LoadGame` (`mod/Code/IIS.lua:1009-1012`). That handler is in the mod since version 0.7.
+- The game log agrees. Versions 0.7 to 0.8.1 of this mod logged `[IIS] LoadGame` in `OnMsg.LoadGame`. Version 0.8.2 uses `PreLoadSessionData` in its place.
   - `logs/JA3.exe-20261108-15.16.59-67b4a1dd.log` has two loads with IIS 0.7.3 (lines 1070, 2070) and no `[IIS] LoadGame` line.
   - `logs/JA3.exe-20261108-09.50.21-67b4a1dd.log` has one load (line 1073) and no such line.
 - In the second load of the first log, `[IIS] combat state reset (CombatStart)` is at line 2059, before `Game loaded on map` at line 2070. `ZuluGameLoaded` comes after it.
@@ -176,19 +177,15 @@ What a mod can do in each hook:
 | `unit.iis_stopped` | `mod/Code/Control.lua:627`, `:634-636` | thread | None. | Nil. | None found. |
 | `win.iis_tag`, `iis_glow_size`, `self.iis_mark` | `mod/Code/UI.lua:120-171` | UI values | None. UI objects are not saved. | Nil. | None. |
 | Interrupt state (`active`, queues, counters for the log) | `mod/Code/Control.lua:13`, `:65`, `:538` | Lua locals | None. | Starts as `false`. | See the load during an interrupt below. |
-| Move plans | `mod/Code/Memory.lua:74-142` | Lua local | None. `Mem.Loaded` is meant to clear them. | Empty after a Lua load. | `Mem.Loaded` never runs. `Mem.Clear` on `CombatStart` clears them. |
+| Move plans | `mod/Code/Memory.lua:74-142` | Lua local | None. `OnMsg.PreLoadSessionData` calls `Mem.Loaded`, which clears them. | Empty after a Lua load. | None. |
 | Mod options | `mod/items.lua`, defaults in `mod/metadata.lua` | values per option | `AccountStorage.ModOptions["ImprovedInterruptSystem"]`, not the save | Defaults from the mod items. | None. The options are per account, not per save. |
 
 ### gv_IIS on load
 - `gv_IIS` gets its saved value at step 9 of the load. `GameSession.lua:548-557`.
-- At step 12, a load into combat sends `CombatStart`. `Tactical/Combat.lua:359`.
-- `OnMsg.CombatStart` calls `ResetCombatState`, which calls `Mem.Clear()`. `mod/Code/IIS.lua:993-1002`. `Mem.Clear` makes all three tables empty. `mod/Code/Memory.lua:158-162`.
-- The mod also clears them on `CombatEnd`. Thus `gv_IIS` is empty outside combat.
-- Result: the saved counters and seen marks never come back. An older save and a new save load the same way.
-- The effect is small for the counters. A save happens on the player turn, and `Mem.TurnStart` cleared the counters of the player team at that turn start. `mod/Code/Memory.lua:146-155`.
-- The seen marks are lost. After a load, `seen_ever` has only what the units see from the first visibility update.
-- The statement "The IIS counters are in the save" (`ROADMAP.md:14`) is true for the file, but the mod clears them on load.
-- A fix: in `OnMsg.CombatStart(dynamic_data)`, do not call `Mem.Clear` when `dynamic_data` is not nil. Issue #41.
+- At step 12, a load into combat sends `CombatStart` with `dynamic_data`. `Tactical/Combat.lua:359`.
+- `OnMsg.CombatStart` in `mod/Code/IIS.lua` calls `Mem.Clear()` only when `dynamic_data` is nil, that is for a new combat. On a load, it clears only `IIS.attack_targets`. That table is not in the save, and its keys are the units of the old map.
+- The mod also clears `gv_IIS` on `CombatEnd`. Thus `gv_IIS` is empty outside combat.
+- In-game test on 2026-11-15: a marker counter in `gv_IIS.counters` survived a quick save and a quick load into combat (#41).
 
 ### IOS pool on load
 - An older save, or a save from before IOS, has no `ios_*` fields. A new save also has none after a load, because the game builds the entry again.
@@ -199,11 +196,12 @@ What a mod can do in each hook:
 - A fix: also write `ios_pool`, `ios_count` and `ios_turn` to `combat_behavior_params[3]`, and read them from there when `g_Overwatch[unit]` has no pool.
 
 ### Load during an interrupt
-- `OnMsg.CanSaveGameQuery` blocks a save during an interrupt. `mod/Code/Control.lua:892-896`.
+- `OnMsg.CanSaveGameQuery` blocks a save during an interrupt. `mod/Code/Control.lua`.
 - `CanLoadGame` does not send `CanSaveGameQuery`. `GameSession.lua:841-850`. Thus the player can load a save during an interrupt.
-- The interrupt waits in the mover's command thread. `ChangeMap("")` deletes the map threads, so `IISControl.EndInterrupt` does not run. That thread deletion is engine code and is unverified.
-- Then `active` in `mod/Code/Control.lua:13` stays set. The overrides in `docs/DEVELOPMENT.md` stay on, and `Start` skips each new interrupt (`mod/Code/Control.lua:437-440`).
-- No handler in the mod resets `active` on `NewGame`, `DoneMap` or `CombatStart`. Issue #42.
+- The interrupt waits in the mover's command thread. The map change deletes the mover and its command, so the wait loop does not end the interrupt.
+- `OnMsg.DoneMap` in `mod/Code/Control.lua` ends the active interrupt with the reason `load`, or `map_change` when `GameState.loading_savegame` is not set. The old map still exists at `DoneMap`, so the give-backs and `IIS.UI.End` run on live objects.
+- `DoneMap` runs in the thread of the load, not in the mover's command thread. Thus the give-back does not call `PopDestructor`, which asserts `IsCommandThread`. The destructor stays until the map deletes the mover, and then `EndInterrupt` finds no active interrupt.
+- In-game test on 2026-11-15, debug build: a quick load and a load through the save manager during an interrupt each logged `INT #N END (load)`. An interrupt started in the next enemy turn after each load (#42).
 
 ## Official docs and JA3
 - `ModTools/Docs/LuaSavegame.md.html` says that the save serializes all objects, game time threads and `GlobalVar`s. It names `PersistSave`, `PersistLoad` and `LoadGame` as hooks.
@@ -214,12 +212,12 @@ What a mod can do in each hook:
 - `GameSession.lua:548-557` shows the same rule for GameVars.
 
 ## Open questions (need an in-game test)
-1. Does `OnMsg.LoadGame` fire on a load in the current game build? Test: load a save and look for `[IIS] LoadGame` in the log. The logs and the Lua say no.
+1. Does `OnMsg.LoadGame` fire on a load in the current game build? The logs and the Lua say no. The mod no longer uses it.
 2. After a load in combat, does the unit on Overwatch run `OverwatchAction` again and make a new `g_Overwatch[unit]`? Test: log the entry and its `ios_*` fields before the save and after the load.
 3. Does an extra key in `combat_behavior_params[3]` survive the save and the load? Test: put `ios_pool` there, save, load and log it.
 4. Does `CombatStart` on a load clear counters and seen marks that the IIS rules need? Test: in JA2 Classic, save in combat, load, and compare the `saw_before` values in the log.
-5. What happens when the player loads a save during an interrupt? Test: start an interrupt, load a save from the menu, then check that the next enemy turn can have interrupts.
-6. Does quick load during an interrupt act the same as the menu load?
+5. Answered: see [Load during an interrupt](#load-during-an-interrupt).
+6. Answered: a quick load and a load through the save manager act the same.
 7. Does `ZuluGameLoaded` always come after the first `CombatStart` of a load? The log shows this for one load.
 8. Is a save on the enemy turn possible, for example an autosave? If yes, the counters of the player watchers are not zero at save time.
 9. Does a save with the mod, loaded with the mod off, give the "missing or outdated" prompt, and does the game then run without errors?
