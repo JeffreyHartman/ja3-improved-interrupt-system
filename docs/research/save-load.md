@@ -168,22 +168,23 @@ What a mod can do in each hook:
 
 | Item | Written in | Type | Mechanism | Save without it | Risk |
 |---|---|---|---|---|---|
-| `gv_IIS.counters[watcher][mover]` | `mod/Code/Memory.lua:49-53`, cleared at `:146-162` | number 0..255, keys session id or handle | GameVar `gv_IIS` (`mod/Code/IIS.lua:316`) | Default `{ counters = {}, ... }` from `GameSession.lua:548-557`. `Store()` adds missing subtables (`mod/Code/Memory.lua:18-25`). | Cleared on each load into combat. See below. |
-| `gv_IIS.seen_turn[unit][other]` | `mod/Code/Memory.lua:56-60` | boolean | GameVar `gv_IIS` | Same as above. | Same as above. |
-| `gv_IIS.seen_ever[unit][other]` | `mod/Code/Memory.lua:56-60` | boolean | GameVar `gv_IIS` | Same as above. | Same as above. JA2 Classic reads it (`mod/Code/IIS.lua:525-530`, `:619-623`). |
+| `gv_IIS.counters[watcher][mover]` | `mod/Code/Memory.lua:49-53`, cleared at `:146-162` | number 0..255, keys session id or handle | GameVar `gv_IIS` (`mod/Code/IIS.lua:321`) | Default `{ counters = {}, ... }` from `GameSession.lua:548-557`. `Store()` adds missing subtables (`mod/Code/Memory.lua:18-25`). | Kept on a load. Cleared on a new combat and on `CombatEnd`. See the gv_IIS on load section. |
+| `gv_IIS.seen_turn[unit][other]` | `mod/Code/Memory.lua:56-60` | boolean | GameVar `gv_IIS` | Same as above. | Kept on a load. Cleared on a new combat and on `CombatEnd`. |
+| `gv_IIS.seen_ever[unit][other]` | `mod/Code/Memory.lua:56-60` | boolean | GameVar `gv_IIS` | Same as above. | Kept on a load. Cleared on a new combat and on `CombatEnd`. JA2 Classic reads it (`mod/Code/IIS.lua:530-535`, `:624-628`). |
 | `g_Overwatch[unit].ios_pool`, `ios_count`, `ios_turn` | `mod/Code/IOS.lua:108-113` | numbers | None. `g_Overwatch` is a MapVar and is built again after a load. | `IOS.Pool` uses `num_attacks * cost` when `ios_pool` is nil (`mod/Code/IOS.lua:98-104`). | A load drops the part of the pool below one attack cost. |
 | `combat_behavior_params[3].num_attacks` | `mod/Code/IOS.lua:137-141` | number | Unit dynamic data (vanilla field) | Vanilla value. | None. The count after a load is the count that IOS set. |
 | `unit.iis_move_start` | `mod/Code/MovingTarget.lua:55-60` | table with a thread and a point | None. Not in `Unit:GetDynamicData`. | Nil. `MoveStart` returns nil, so the penalty is 0. | The move start of a move that was running at save time is lost. |
-| `unit.iis_stopped` | `mod/Code/Control.lua:627`, `:634-636` | thread | None. | Nil. | None found. |
+| `unit.iis_stopped` | `mod/Code/Control.lua:630`, `:637-639` | thread | None. | Nil. | None found. |
 | `win.iis_tag`, `iis_glow_size`, `self.iis_mark` | `mod/Code/UI.lua:120-171` | UI values | None. UI objects are not saved. | Nil. | None. |
-| Interrupt state (`active`, queues, counters for the log) | `mod/Code/Control.lua:13`, `:65`, `:538` | Lua locals | None. | Starts as `false`. | See the load during an interrupt below. |
-| Move plans | `mod/Code/Memory.lua:74-142` | Lua local | None. `OnMsg.PreLoadSessionData` calls `Mem.Loaded`, which clears them. | Empty after a Lua load. | None. |
+| Interrupt state (`active`, queues, counters for the log) | `mod/Code/Control.lua:13`, `:65`, `:541` | Lua locals | None. | Starts as `false`. | See the load during an interrupt below. |
+| Move plans | `mod/Code/Memory.lua:74-142` | Lua local | None. `OnMsg.PreLoadSessionData` calls `Mem.Loaded` on every load, which clears them. | Empty after a Lua load. | None. |
 | Mod options | `mod/items.lua`, defaults in `mod/metadata.lua` | values per option | `AccountStorage.ModOptions["ImprovedInterruptSystem"]`, not the save | Defaults from the mod items. | None. The options are per account, not per save. |
 
 ### gv_IIS on load
 - `gv_IIS` gets its saved value at step 9 of the load. `GameSession.lua:548-557`.
 - At step 12, a load into combat sends `CombatStart` with `dynamic_data`. `Tactical/Combat.lua:359`.
-- `OnMsg.CombatStart` in `mod/Code/IIS.lua` calls `Mem.Clear()` only when `dynamic_data` is nil, that is for a new combat. On a load, it clears only `IIS.attack_targets`. That table is not in the save, and its keys are the units of the old map.
+- `OnMsg.CombatStart` in `mod/Code/IIS.lua` calls `Mem.Clear()` only for a new combat, when `dynamic_data` is nil. On a load, it keeps `gv_IIS`.
+- `OnMsg.PreLoadSessionData` runs on every load, also a load outside combat. It calls `Mem.Loaded()` and clears `IIS.attack_targets`. That table is not in the save, and its keys are the units of the old map.
 - The mod also clears `gv_IIS` on `CombatEnd`. Thus `gv_IIS` is empty outside combat.
 - In-game test on 2026-11-15: a marker counter in `gv_IIS.counters` survived a quick save and a quick load into combat (#41).
 
@@ -196,7 +197,7 @@ What a mod can do in each hook:
 - A fix: also write `ios_pool`, `ios_count` and `ios_turn` to `combat_behavior_params[3]`, and read them from there when `g_Overwatch[unit]` has no pool.
 
 ### Load during an interrupt
-- `OnMsg.CanSaveGameQuery` blocks a save during an interrupt. `mod/Code/Control.lua`.
+- `OnMsg.CanSaveGameQuery` blocks a save during an interrupt. `mod/Code/Control.lua:895`.
 - `CanLoadGame` does not send `CanSaveGameQuery`. `GameSession.lua:841-850`. Thus the player can load a save during an interrupt.
 - The interrupt waits in the mover's command thread. The map change deletes the mover and its command, so the wait loop does not end the interrupt.
 - `OnMsg.DoneMap` in `mod/Code/Control.lua` ends the active interrupt with the reason `load`, or `map_change` when `GameState.loading_savegame` is not set. The old map still exists at `DoneMap`, so the give-backs and `IIS.UI.End` run on live objects.
@@ -212,7 +213,7 @@ What a mod can do in each hook:
 - `GameSession.lua:548-557` shows the same rule for GameVars.
 
 ## Open questions (need an in-game test)
-1. Does `OnMsg.LoadGame` fire on a load in the current game build? The logs and the Lua say no. The mod no longer uses it.
+1. Does `OnMsg.LoadGame` fire on a load in the current game build? The logs and the Lua say no. The mod has no handler for it.
 2. After a load in combat, does the unit on Overwatch run `OverwatchAction` again and make a new `g_Overwatch[unit]`? Test: log the entry and its `ios_*` fields before the save and after the load.
 3. Does an extra key in `combat_behavior_params[3]` survive the save and the load? Test: put `ios_pool` there, save, load and log it.
 4. Does `CombatStart` on a load clear counters and seen marks that the IIS rules need? Test: in JA2 Classic, save in combat, load, and compare the `saw_before` values in the log.

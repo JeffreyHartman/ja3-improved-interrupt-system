@@ -77,7 +77,7 @@ These overrides change behavior only while an interrupt is active:
 | `HUDMercClass.SetupStyle` (in `UI.lua`) | Marks the portraits. |
 | `OnMsg.CanSaveGameQuery` | Blocks saves during an interrupt. |
 
-A load during an interrupt ends the interrupt with the reason `load`. `CanLoadGame` does not ask the mod, so `OnMsg.DoneMap` ends the interrupt before the map closes. It runs outside the mover's command thread, so the mover destructor stays on the old mover.
+A load during an interrupt ends the interrupt with the reason `load`. `CanLoadGame` does not ask the mod, so `OnMsg.DoneMap` ends the interrupt before the map closes. It runs outside the mover's command thread, so the mover destructor stays on the old mover. A map change without a load gives the reason `map_change`. The end skips the Stop of the mover.
 
 ## Options
 
