@@ -4,6 +4,13 @@ This file lists the changes in each version of the mod. The format follows [Keep
 
 A version is `version_major.version_minor` and a patch number. The game shows the build number, which is `version` in `mod/metadata.lua`. When you bump `version`, add a section here.
 
+## 0.8.2 (build 14), not released
+
+### Fixed
+
+- A load into a combat keeps the IIS counters and the seen marks of the save. Before, the mod cleared them on each load, and JA2 Classic then treated units that saw each other before the save as new (#41).
+- A load during an interrupt ends the interrupt. Before, the interrupt could stay active after the load, so no new interrupt started and the overrides of the interrupt stayed on (#42).
+
 ## 0.8.1 (build 13), not released
 
 ### Fixed
