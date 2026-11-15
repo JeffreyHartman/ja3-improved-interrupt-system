@@ -137,7 +137,7 @@ What a mod can do in each hook:
   - `num_attacks` comes from `g_Overwatch[unit]`, which is empty, so it comes from `args.num_attacks`. `Tactical/UnitOverwatch.lua:117`.
 - Vanilla keeps `args.num_attacks` correct after each shot. `Tactical/UnitOverwatch.lua:1400-1403`.
 - Result: an unknown field on `g_Overwatch[unit]` is not saved. A load drops it.
-- An extra key in `args` (`combat_behavior_params[3]`) stays through the save and the copy in `OverwatchAction`. That is not tested in game.
+- An extra key in `args` (`combat_behavior_params[3]`) stays through the save and the copy in `OverwatchAction`. In-game test on 2026-11-15: `ios_pool` in the args survived a quick save and a quick load.
 
 ### Fields on other objects
 - Unit: only the fields in `Unit:GetDynamicData` are saved. A plain mod field is lost.
@@ -171,8 +171,8 @@ What a mod can do in each hook:
 | `gv_IIS.counters[watcher][mover]` | `mod/Code/Memory.lua:49-53`, cleared at `:146-162` | number 0..255, keys session id or handle | GameVar `gv_IIS` (`mod/Code/IIS.lua:321`) | Default `{ counters = {}, ... }` from `GameSession.lua:548-557`. `Store()` adds missing subtables (`mod/Code/Memory.lua:18-25`). | Kept on a load. Cleared on a new combat and on `CombatEnd`. See the gv_IIS on load section. |
 | `gv_IIS.seen_turn[unit][other]` | `mod/Code/Memory.lua:56-60` | boolean | GameVar `gv_IIS` | Same as above. | Kept on a load. Cleared on a new combat and on `CombatEnd`. |
 | `gv_IIS.seen_ever[unit][other]` | `mod/Code/Memory.lua:56-60` | boolean | GameVar `gv_IIS` | Same as above. | Kept on a load. Cleared on a new combat and on `CombatEnd`. JA2 Classic reads it (`mod/Code/IIS.lua:530-535`, `:624-628`). |
-| `g_Overwatch[unit].ios_pool`, `ios_count`, `ios_turn` | `mod/Code/IOS.lua:108-113` | numbers | None. `g_Overwatch` is a MapVar and is built again after a load. | `IOS.Pool` uses `num_attacks * cost` when `ios_pool` is nil (`mod/Code/IOS.lua:98-104`). | A load drops the part of the pool below one attack cost. |
-| `combat_behavior_params[3].num_attacks` | `mod/Code/IOS.lua:137-141` | number | Unit dynamic data (vanilla field) | Vanilla value. | None. The count after a load is the count that IOS set. |
+| `g_Overwatch[unit].ios_pool`, `ios_count`, `ios_turn` | `mod/Code/IOS.lua:120-129` | numbers | None. `g_Overwatch` is a MapVar and is built again after a load. | `IOS.Pool` reads the saved args (`mod/Code/IOS.lua:113-116`). | None. |
+| `combat_behavior_params[3].num_attacks`, `ios_pool`, `ios_count`, `ios_turn` | `mod/Code/IOS.lua:120-129`, `:154` | numbers | Unit dynamic data (vanilla table) | Vanilla `num_attacks`, no `ios_*` fields. `IOS.Pool` then uses `num_attacks * cost`. | None. |
 | `unit.iis_move_start` | `mod/Code/MovingTarget.lua:55-60` | table with a thread and a point | None. Not in `Unit:GetDynamicData`. | Nil. `MoveStart` returns nil, so the penalty is 0. | The move start of a move that was running at save time is lost. |
 | `unit.iis_stopped` | `mod/Code/Control.lua:630`, `:637-639` | thread | None. | Nil. | None found. |
 | `win.iis_tag`, `iis_glow_size`, `self.iis_mark` | `mod/Code/UI.lua:120-171` | UI values | None. UI objects are not saved. | Nil. | None. |
@@ -189,12 +189,11 @@ What a mod can do in each hook:
 - In-game test on 2026-11-15: a marker counter in `gv_IIS.counters` survived a quick save and a quick load into combat (#41).
 
 ### IOS pool on load
-- An older save, or a save from before IOS, has no `ios_*` fields. A new save also has none after a load, because the game builds the entry again.
-- `IOS.Pool` treats both cases the same. The pool is `num_attacks` times the live cost of one default attack. `mod/Code/IOS.lua:98-104`.
-- `num_attacks` is correct after a load, because IOS also writes it to `combat_behavior_params[3]`. `mod/Code/IOS.lua:137-141`.
-- Example: a pool of 7 AP with an attack cost of 4 AP has `num_attacks = 1`. After a load the pool is 4 AP.
-- `docs/DEVELOPMENT.md:55` says that the game saves `g_Overwatch[unit]`. This is not correct. The game saves `combat_behavior_params[3]` and builds `g_Overwatch[unit]` from it.
-- A fix: also write `ios_pool`, `ios_count` and `ios_turn` to `combat_behavior_params[3]`, and read them from there when `g_Overwatch[unit]` has no pool.
+- The game saves `combat_behavior_params[3]` and builds `g_Overwatch[unit]` from it after a load, without the `ios_*` fields.
+- `IOS.StorePool` writes `ios_pool`, `ios_count`, `ios_turn` and `num_attacks` to `g_Overwatch[unit]` and to `combat_behavior_params[3]`. `mod/Code/IOS.lua:120-129`.
+- `IOS.Pool` uses the pool of `g_Overwatch[unit]`, or else the pool of the saved args, when its attack count and turn match. `mod/Code/IOS.lua:113-116`.
+- An older save, or a save from before version 0.8.2, has no `ios_*` fields in the args. Then the pool is `num_attacks` times the live cost of one default attack.
+- In-game test on 2026-11-15: a pool of 4.9 AP with an attack cost of 3.4 AP stayed 4.9 AP after a quick save and a quick load. Without the saved args, the pool is 3.4 AP.
 
 ### Load during an interrupt
 - `OnMsg.CanSaveGameQuery` blocks a save during an interrupt. `mod/Code/Control.lua:895`.
@@ -214,8 +213,8 @@ What a mod can do in each hook:
 
 ## Open questions (need an in-game test)
 1. Does `OnMsg.LoadGame` fire on a load in the current game build? The logs and the Lua say no. The mod has no handler for it.
-2. After a load in combat, does the unit on Overwatch run `OverwatchAction` again and make a new `g_Overwatch[unit]`? Test: log the entry and its `ios_*` fields before the save and after the load.
-3. Does an extra key in `combat_behavior_params[3]` survive the save and the load? Test: put `ios_pool` there, save, load and log it.
+2. Answered: yes. After a quick load, `g_Overwatch[unit]` existed again with the saved `num_attacks` and no `ios_*` fields.
+3. Answered: yes. See [IOS pool on load](#ios-pool-on-load).
 4. Does `CombatStart` on a load clear counters and seen marks that the IIS rules need? Test: in JA2 Classic, save in combat, load, and compare the `saw_before` values in the log.
 5. Answered: see [Load during an interrupt](#load-during-an-interrupt).
 6. Answered: a quick load and a load through the save manager act the same.

@@ -2085,6 +2085,27 @@ t.case("IOS: an Overwatch state without a pool, as from an old save, gets a pool
 	t.eq(during, 20000)
 end)
 
+t.case("IOS: after a load, the pool comes from the saved Overwatch args, also the part below one attack cost", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 3000 }
+	ow.combat_behavior = "OverwatchAction"
+	ow.combat_behavior_params = { "Attack", 0, { num_attacks = 3 } }
+	g_Combat.current_turn = 1
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 4000) }, { at = 300, run = PressEndTurn } })
+	-- A load builds the Overwatch state again from the saved args, without the IOS fields.
+	local args = ow.combat_behavior_params[3]
+	g_Overwatch[ow] = { num_attacks = args.num_attacks, triggered_by = {} }
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() during = ow.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	g_Combat.current_turn = nil
+	t.eq(args.num_attacks, 1)
+	t.eq(during, 5000)
+end)
+
 t.case("IOS: after the game counts the attacks of a set-up machine gun again at its turn start, the pool comes from the new count", function()
 	local mover, _, dummies = WalkingMover(10)
 	local ow = Overwatcher{ attacks = 2, cost = 3000, permanent = true }

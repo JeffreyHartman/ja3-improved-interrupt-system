@@ -11,7 +11,7 @@ The mod keeps its name, "Improved Interrupt System". The mod description must na
 
 Release as a beta when all of these are done.
 
-- [ ] Save and load after a combat with interrupts. #41 (IIS counters on a load into combat) and #42 (a load during an interrupt) are fixed. The open part is the IOS pool: a load loses the part of the pool below one attack cost. See [save and load research](docs/research/save-load.md), IOS pool on load.
+- [x] Save and load after a combat with interrupts. A load keeps the IIS counters (#41) and the IOS pool, and a load during an interrupt ends the interrupt (#42). See [save and load research](docs/research/save-load.md).
 - [ ] Play several full combats in a campaign, not only in the mod editor.
 - [ ] Decide how often interrupts must happen, and set the defaults (#2).
 - [ ] Add enemy interrupts. See [Enemy interrupts](#enemy-interrupts).
