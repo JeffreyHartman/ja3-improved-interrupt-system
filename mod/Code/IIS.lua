@@ -603,10 +603,11 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 				local _, m_dark = E.Sight(mover, w)
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover) }),
+					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover),
+						team_knows = E.TeamSees(w.team, mover) }),
 					{ passive = true, distance = d, max_visible = max_visible, dark = w_dark, other_saw_me = Mem.SeenBefore(mover, w) })
 				local mp = R.ClassicPoints(
-					IIS.ClassicSoldier(mover, { stance = dummy.stance or mover.stance, running = running,
+					IIS.ClassicSoldier(mover, { is_player = IIS.IsPlayerSide(mover), stance = dummy.stance or mover.stance, running = running,
 						saw_before = Mem.SeenBefore(mover, w), team_knows = E.TeamSees(mover.team, w) }),
 					{ passive = false, distance = d, max_visible = max_visible, dark = m_dark, other_saw_me = Mem.SeenBefore(w, mover) })
 				local m_sees_w = E.MoverSeesWatcher(mover, dummy, w)
@@ -697,10 +698,11 @@ function IIS.FindAttackTrigger(mover, n)
 				local d = E.DistTiles(w, mover:GetPos())
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover) }),
+					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover),
+						team_knows = E.TeamSees(w.team, mover) }),
 					{ passive = true, distance = d, max_visible = max_visible, other_saw_me = true })
 				local mp = R.ClassicPoints(
-					IIS.ClassicSoldier(mover, { saw_before = true, team_knows = true }),
+					IIS.ClassicSoldier(mover, { is_player = IIS.IsPlayerSide(mover), saw_before = true, team_knows = true }),
 					{ passive = false, distance = d, max_visible = max_visible, other_saw_me = Mem.SeenBefore(w, mover) })
 				local won, margin, how = R.ClassicDuel(wp, mp, true, true)
 				local row = { unit = w, won = won, margin = margin, how = how,
@@ -832,8 +834,8 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	return { entry }, idx
 end
 
--- IIS collective interrupts (Soldier Control.cpp:24960): teammates within 5 tiles of an original
--- winner join it by chance.
+-- IIS collective interrupts (Soldier Control.cpp:24960): teammates of an original winner within 5 tiles of it
+-- join by chance. This holds for merc winners and enemy winners.
 local function AddCollective(st_mercs, mover, n)
 	local rc = IIS.RulesConfig()
 	local originals = {}
@@ -845,6 +847,9 @@ local function AddCollective(st_mercs, mover, n)
 		for _, mate in ipairs(IIS.Watchers(mover)) do
 			local skip = table.find(st_mercs, mate) and "interrupter"
 				or IIS.ObserverSkipReason(mate, mover) or IIS.WinSkipReason(mate, "IIS")
+			if not skip and mate.team ~= leader.team then
+				skip = "other team"
+			end
 			if not skip then
 				local dist = E.DistTiles(leader, mate:GetPos())
 				if dist > rc.collective_radius then
@@ -875,7 +880,7 @@ end
 --- The IISControl handler for "iis" and "iis_enemy" entries. Returns the interrupt request for the
 -- winners of the check that can still act and the collective joiners, or nil for an entry from an
 -- older version or when no winner can act. An "iis_enemy" entry gives an Enemy interrupt, which
--- always stops a merc that moves and has no collective joiners.
+-- always stops a merc that moves.
 -- It calls IISMemory.Fired for the interrupters and logs the commit. `n` is the interrupt number
 -- for the collective log lines.
 function IIS.InterruptRequest(mover, entry, n)
@@ -904,7 +909,7 @@ function IIS.InterruptRequest(mover, entry, n)
 		interrupters[i] = m
 	end
 	local joined = {}
-	if info.system == "IIS" and cfg.collective and not info.enemy then
+	if info.system == "IIS" and cfg.collective then
 		IIS.SafeCall(nil, "collective", function()
 			joined = AddCollective(interrupters, mover, n)
 		end)
@@ -991,16 +996,40 @@ local function IsTracedEnemy(unit)
 	return g_Combat and IsKindOf(unit, "Unit") and unit.team and not E.CanControlTeam(unit)
 end
 
+-- True when unit is an AI unit whose actions register AP with the mercs: an enemy in its AI turn,
+-- or an interrupter of an Enemy interrupt.
+local function AIActionRegisters(unit)
+	if not g_AIExecutionController then return false end
+	local it = IISControl.Active()
+	if it and it:IsEnemy() then
+		return table.find(it:Interrupters(), unit) and true or false
+	end
+	return E.IsAITurnEnemy(unit) and true or false
+end
+
+-- A merc's action in its own turn registers AP with the enemies that see it (IIS).
+local function RegisterMercAction(action_id, unit, ap)
+	if IIS.Config.system ~= "IIS" or not IIS.Config.enemy_interrupts then return end
+	if action_id == "Move" or (ap or 0) <= 0 or IISControl.Active() or not E.IsPlayerTurnMerc(unit) then return end
+	local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
+	if not ok then
+		Log("RegisterAction failed: %s", tostring(err))
+	end
+end
+
 function OnMsg.RunCombatAction(action_id, unit, ap)
-	if not g_Combat or not IsValid(unit) or not unit.team or E.CanControlTeam(unit) then return end
+	if not g_Combat or not IsValid(unit) or not unit.team then return end
 	IIS.attack_targets[unit] = nil
+	if E.CanControlTeam(unit) then
+		RegisterMercAction(action_id, unit, ap)
+		return
+	end
 	Count(IIS.turn_stats.enemy_actions, unit)
 	local behavior = unit.ai_context and unit.ai_context.behavior
 	Log("enemy action %s unit=%s cost=%s ap_left=%s pos=%s behavior=%s status=%s",
 		tostring(action_id), Name(unit), FormatAP(ap), AP(unit), Pos(unit),
 		tostring(behavior and (behavior.id or behavior.class)), StatusList(unit))
-	if IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0
-		and g_AIExecutionController and E.IsAITurnEnemy(unit) then
+	if IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0 and AIActionRegisters(unit) then
 		local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
 		if not ok then
 			Log("RegisterAction failed: %s", tostring(err))
@@ -1009,7 +1038,7 @@ function OnMsg.RunCombatAction(action_id, unit, ap)
 end
 
 function OnMsg.Attack(action, results, attack_args, combat_starting, attacker, target)
-	if not g_Combat or not IsKindOf(attacker, "Unit") or not attacker.team or E.CanControlTeam(attacker) then return end
+	if not g_Combat or not IsKindOf(attacker, "Unit") or not attacker.team then return end
 	local set = IIS.attack_targets[attacker] or {}
 	IIS.attack_targets[attacker] = set
 	if IsKindOf(target, "Unit") then
