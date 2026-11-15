@@ -216,14 +216,14 @@ local function EnemyScene(sx, sy, ex, ey)
 	return enemy, merc
 end
 
-t.case("Moving target: an AI interrupter's shot at the moving merc gets the penalty", function()
+t.case("Moving target: an enemy interrupter's shot at the moving merc gets the penalty", function()
 	IIS.Config.moving_target_penalty = 25
 	local enemy, merc = EnemyScene(-10, 10, 0, 10)
 	t.eq(Penalty(enemy, merc), -25)
 	EndActive()
 end)
 
-t.case("Moving target: an AI interrupter's shot at the moving merc gets nothing with the penalty option at 0", function()
+t.case("Moving target: an enemy interrupter's shot at the moving merc gets nothing with the penalty option at 0", function()
 	IIS.Config.moving_target_penalty = 0
 	local enemy, merc = EnemyScene(-10, 10, 0, 10)
 	t.eq(Penalty(enemy, merc), 0)

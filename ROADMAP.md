@@ -44,7 +44,7 @@ Issue #44 has the spec. The decisions:
 - Enemy interrupts work in IIS and JA2 Classic, with the same rules as player interrupts. A new option "Enemy interrupts" turns them on or off.
 - A merc's moves and attacks cause a check. In IIS, every merc action that an enemy sees registers AP with that enemy.
 - An enemy interrupter uses the AP that it kept from its own turn. The AI does not keep AP for interrupts. A playtest measured a median of 2.6 kept AP.
-- The merc stops, and its command ends. Then the vanilla AI plays the interrupters in a new thread (ADR 0003). The AI controller moves the camera, and then the camera goes back to the merc.
+- The interrupt blocks player orders and shows the banner. A merc that moves stops. A merc that attacks finishes the attack. Then the vanilla AI plays the interrupters in a new thread (ADR 0003). The AI controller moves the camera, and then the camera goes back to the merc.
 
 Counter-interrupts (#16) need the same parts: the other team acts during an interrupt, and then control comes back. Build enemy interrupts so that #16 can use them.
 

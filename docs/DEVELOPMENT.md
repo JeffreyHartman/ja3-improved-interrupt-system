@@ -44,7 +44,7 @@ The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adap
 
 When the mover is a merc in the player turn and the "Enemy interrupts" option is on, `IIS.Watchers` gives the AI units (`E.AIUnits`), and the checks use the same rules as for a merc watcher. `IIS.ObserverSkipReason` refuses neutral units (`E.IsNeutral`) and units that are not hostile to the merc, such as militia and AI allies. A win adds an `"iis_enemy"` entry. `IIS.InterruptRequest` handles it too, and its request has `enemy = true` and no collective joiners.
 
-For a request with `enemy = true`, `IISControl` does not wait in the merc's command thread (ADR 0003). It makes the Enemy interrupt the active interrupt, stops the merc at once, and starts a game-time thread that calls `IISControl.RunEnemyAI`. That function calls `E.RunAI(units, camera_obj)`, which runs `AIExecutionController:Execute` for the interrupters that can act, and then ends the interrupt with the reason `ai_done`. A second thread (`IISControl.WatchEnemyAI`) ends the interrupt with the reason `ai_timeout` after `enemy_ai_timeout_ms` (45 s of game time) and calls `E.StopAI`. The tests replace `E.RunAI` with a fake, and `E.StopAI` is not tested in the game. `Interrupt:IsEnemy()` is true for an Enemy interrupt. The overrides that give the engine to merc interrupters apply only to a Player interrupt. During an Enemy interrupt, no player unit can be controlled or start an action, and End Turn does nothing. `OnMsg.CanSaveGameQuery` blocks saves, and a load ends the interrupt with the reason `load`, so the AI does not run.
+For a request with `enemy = true`, `IISControl` does not wait in the merc's command thread (ADR 0003). It makes the Enemy interrupt the active interrupt, and it stops the merc if the merc moves (the command of a merc that attacks ends by itself). Then it starts a game-time thread that calls `IISControl.RunEnemyAI`. That function calls `E.RunAI(units, camera_obj)`, which runs `AIExecutionController:Execute` for the interrupters that can act, and then ends the interrupt with the reason `ai_done`. A second thread (`IISControl.WatchEnemyAI`) ends the interrupt with the reason `ai_timeout` after `enemy_ai_timeout_ms` (45 s of game time) and calls `E.StopAI`. The tests replace `E.RunAI` with a fake, and the tests do not call `E.StopAI`. `Interrupt:IsEnemy()` is true for an Enemy interrupt. The overrides that give the engine to merc interrupters apply only to a Player interrupt. During an Enemy interrupt, no player unit can be controlled or start an action, and End Turn does nothing. `OnMsg.CanSaveGameQuery` blocks saves, and a load ends the interrupt with the reason `load`, so the AI does not run.
 
 The interrupt shows the banner "Enemy Interrupt" (`UI.BeginEnemy`, `UI.EndEnemy`). At the end, `EndInterrupt` selects the interrupted merc again when it is valid, alive and not down. The AI run can change the selection.
 
@@ -81,13 +81,13 @@ These overrides change behavior only while an interrupt is active:
 | Override | Why |
 |---|---|
 | `IsNetPlayerTurn` | Returns true. The UI and the action start code ask it whose turn it is. |
-| `Unit:CanBeControlled` | True for the interrupters. False, with the reason `iis_not_interrupter`, for the other player units. |
+| `Unit:CanBeControlled` | True for the interrupters. False, with the reason `iis_not_interrupter`, for the other player units. During an Enemy interrupt it is false for every player unit, with the reason `iis_enemy_interrupt`. |
 | `CombatActionCannotBeStarted` | Counts only the interrupters' running actions. The frozen enemy's action never ends during the interrupt. |
-| `StartCombatAction` | Runs the interrupters' actions in a queue with the vanilla start rule. It refuses an action that the interrupter's action limit refuses. |
+| `StartCombatAction` | Runs the interrupters' actions in a queue with the vanilla start rule. It refuses an action that the interrupter's action limit refuses. During an Enemy interrupt it refuses every action of a player unit and logs `refused: enemy interrupt`. |
 | `Unit:IsIdleOrRunningBehavior` | Returns true for the frozen enemy, because `Unit:FirearmAttack` waits until its target is idle. |
 | `WaitOtherCombatActionsEnd` | An interrupter waits only for the other interrupters. |
 | `IModeCombatMovement:OnMouseButtonDown` | Sets `g_CurrentTeam` to the player team during the click handler. |
-| `NetSyncEvents.EndTurn`, `NetSyncLocalEffects.EndTurn` | End the interrupt instead of the turn. |
+| `NetSyncEvents.EndTurn`, `NetSyncLocalEffects.EndTurn` | End a Player interrupt instead of the turn. During an Enemy interrupt they do nothing and log `End Turn ignored: enemy interrupt`. |
 | `HUDMercClass.SetupStyle` (in `UI.lua`) | Marks the portraits. |
 | `OnMsg.CanSaveGameQuery` | Blocks saves during an interrupt. |
 
@@ -162,6 +162,10 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 | `attack cost lookup failed for` | The game call for the default attack cost of a unit failed with a Lua error. Each unit writes this line once per combat turn. The unit cannot win an IIS or JA2 Classic interrupt (`attack cost unknown`). |
 | `INT #- <type> handler failed` | A provoke-list handler failed. Vanilla gets the entries of that group. |
 | `INT #N UI enemy banner` | The "Enemy Interrupt" banner showed or did not show. |
+| `INT #N AI runs for` | The AI starts for the interrupters of an Enemy interrupt. |
+| `INT #N ... refused: enemy interrupt` | A player unit tried an action during an Enemy interrupt. The action did not start. |
+| `INT #N End Turn ignored: enemy interrupt` | The player pressed End Turn during an Enemy interrupt. Nothing happened. |
+| `same step as vanilla ..., vanilla runs first` | An enemy on Overwatch triggered on the same step as an enemy interrupt. The Overwatch fires first. |
 | `INT #N collective` | A collective interrupt roll, or the reason that a teammate did not roll. |
 | `INT #N run action`, `action ended` | An interrupter action started or ended. |
 | `INT #N waiting` | The state of a waiting interrupt. It is written when the state changes, and every 30 seconds. |

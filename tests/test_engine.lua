@@ -3096,7 +3096,7 @@ t.case("Watchers: a merc is on the player side and an enemy is not, and each wat
 	t.eq(Q.IsPlayerSide(merc), true)
 	t.eq(Q.IsPlayerSide(enemy), false)
 	t.eq(Q.ObserverSkipReason(merc, enemy), nil)
-	t.eq(Q.ObserverSkipReason(merc, merc), "not player controlled")
+	t.eq(Q.ObserverSkipReason(merc, merc), "same side as mover")
 end)
 
 ------------------------------------------------------------------------------------------------
@@ -3557,7 +3557,7 @@ t.case("Enemy interrupt: a merc action that an enemy sees adds to the counter of
 	t.eq(Mem.Counter(e, merc), 24)
 end)
 
-t.case("Enemy interrupt: an AI interrupter's action adds to the counters of the mercs, and no player interrupt starts", function()
+t.case("Enemy interrupt: an enemy interrupter's action adds to the counters of the mercs, and no player interrupt starts", function()
 	local merc, e, dummies = WalkingMerc(10)
 	world.players = { merc }
 	world.sees[merc] = { [e] = true }

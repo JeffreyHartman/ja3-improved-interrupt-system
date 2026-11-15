@@ -1,6 +1,6 @@
 -- Improved Interrupt System: interrupts in the style of JA2 1.13, by mercs and by AI enemies.
 -- This file holds the settings, the log, the trigger checks and the IISControl handler for "iis"
--- entries. Rules.lua has the 1.13 formulas, Memory.lua has the Watcher memory, Control.lua runs an
+-- and "iis_enemy" entries. Rules.lua has the 1.13 formulas, Memory.lua has the Watcher memory, Control.lua runs an
 -- interrupt and UI.lua shows it.
 --
 -- A trigger is an entry { "iis", top_merc, info, dummy } that the wrapper of
@@ -503,7 +503,7 @@ end
 -- A watcher whose AP the mover's actions can register (IIS) or who can duel (JA2 Classic).
 function IIS.ObserverSkipReason(w, mover)
 	if not IsValid(w) or w:IsIncapacitated() then return "incapacitated" end
-	if IIS.IsPlayerSide(w) == IIS.IsPlayerSide(mover) then return "not player controlled" end
+	if IIS.IsPlayerSide(w) == IIS.IsPlayerSide(mover) then return "same side as mover" end
 	if E.IsNeutral(w) then return "neutral" end
 	if not w:IsOnEnemySide(mover) then return "not enemies" end
 end
@@ -527,6 +527,15 @@ function IIS.WinSkipReason(w, system)
 	end
 end
 
+-- The mover checks that are the same for a merc mover and an AI mover.
+function IIS.SharedMoverSkipReason(mover)
+	if mover.command == "Reposition" or g_AIExecutionController and g_AIExecutionController.reposition then
+		return "reposition phase"
+	end
+	if IsSetpiecePlaying() then return "setpiece" end
+	if IISControl.Active() then return "interrupt active" end
+end
+
 function IIS.MoverSkipReason(mover, trigger_type, visible_only, return_result)
 	local cfg = IIS.Config
 	if cfg.system == "Off" then return "interrupt system off" end
@@ -539,9 +548,8 @@ function IIS.MoverSkipReason(mover, trigger_type, visible_only, return_result)
 		return IIS.MercMoverSkipReason(mover)
 	end
 	if not g_AIExecutionController then return "no AI turn" end
-	if g_AIExecutionController.reposition or mover.command == "Reposition" then return "reposition phase" end
-	if IsSetpiecePlaying() then return "setpiece" end
-	if IISControl.Active() then return "interrupt active" end
+	local skip = IIS.SharedMoverSkipReason(mover)
+	if skip then return skip end
 	if not E.IsAITurnEnemy(mover) then return "mover is not on the AI team that has the turn" end
 	if mover.opportunity_attack then return "mover is in an opportunity attack" end
 end
@@ -549,11 +557,8 @@ end
 -- The rest of MoverSkipReason for a merc mover, whose checks can start an enemy interrupt.
 function IIS.MercMoverSkipReason(mover)
 	if not IIS.Config.enemy_interrupts then return "enemy interrupts off" end
-	if mover.command == "Reposition" or g_AIExecutionController and g_AIExecutionController.reposition then
-		return "reposition phase"
-	end
-	if IsSetpiecePlaying() then return "setpiece" end
-	if IISControl.Active() then return "interrupt active" end
+	local skip = IIS.SharedMoverSkipReason(mover)
+	if skip then return skip end
 	if not E.IsPlayerTurnMerc(mover) then return "mover is not on the player team that has the turn" end
 	if g_AIExecutionController then return "AI controller running" end
 end
@@ -821,31 +826,31 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	end
 
 	stats.triggers = stats.triggers + 1
-	local mercs = {}
+	local winner_units = {}
 	for i, row in ipairs(winners) do
-		mercs[i] = row.unit
+		winner_units[i] = row.unit
 	end
 	local where = trigger_type == "move"
 		and string.format("step %d/%d pos=%s", idx, #dummies, tostring(dummies[idx].pos))
 		or "after its attack"
-	local enemy = IIS.IsPlayerSide(mover)
-	local info = { kind = trigger_type == "move" and "move" or "attack", system = system, mercs = mercs,
-		winners = winners, rows = rows, step = idx, check = n, where = where, enemy = enemy }
-	local entry = { enemy and "iis_enemy" or "iis", mercs[1], info, dummies[idx] }
+	local is_enemy_interrupt = IIS.IsPlayerSide(mover)
+	local info = { kind = trigger_type == "move" and "move" or "attack", system = system, mercs = winner_units,
+		winners = winners, rows = rows, step = idx, check = n, where = where, enemy = is_enemy_interrupt }
+	local entry = { is_enemy_interrupt and "iis_enemy" or "iis", winner_units[1], info, dummies[idx] }
 
 	if interrupts and provoke_idx < idx then
 		Log("check #%d %s mover=%s: %d winner(s) at %s, but a vanilla interrupt (%s) comes first at step %d. Ours waits for the next check.",
-			n, system, Name(mover), #mercs, where, tostring(interrupts[1][1]), provoke_idx)
+			n, system, Name(mover), #winner_units, where, tostring(interrupts[1][1]), provoke_idx)
 		return interrupts, provoke_idx
 	end
 	if real then
 		Log("check #%d %s TRIGGER mover=%s at %s: %s", n, system, Name(mover), where, RowList(winners))
 	else
 		-- AIExecutionController:SelectPlayingUnits runs the same check to group its units.
-		Log("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(mercs))
+		Log("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(winner_units))
 	end
 	-- The provoke-list wrapper starts an Enemy interrupt after the vanilla entries (Control.lua).
-	if interrupts and provoke_idx == idx and enemy then
+	if interrupts and provoke_idx == idx and is_enemy_interrupt then
 		Log("check #%d   same step as vanilla %s, vanilla runs first", n, tostring(interrupts[1][1]))
 		interrupts[#interrupts + 1] = entry
 		return interrupts, provoke_idx
@@ -863,16 +868,16 @@ end
 
 -- IIS collective interrupts (Soldier Control.cpp:24960): teammates of an original winner within 5 tiles of it
 -- join by chance. This holds for merc winners and enemy winners.
-local function AddCollective(st_mercs, mover, n)
+local function AddCollective(st_winners, mover, n)
 	local rc = IIS.RulesConfig()
 	local originals = {}
-	for i, m in ipairs(st_mercs) do
+	for i, m in ipairs(st_winners) do
 		originals[i] = m
 	end
 	local joined = {}
 	for _, leader in ipairs(originals) do
 		for _, mate in ipairs(IIS.Watchers(mover)) do
-			local skip = table.find(st_mercs, mate) and "interrupter"
+			local skip = table.find(st_winners, mate) and "interrupter"
 				or IIS.ObserverSkipReason(mate, mover) or IIS.WinSkipReason(mate, "IIS")
 			if not skip and mate.team ~= leader.team then
 				skip = "other team"
@@ -895,7 +900,7 @@ local function AddCollective(st_mercs, mover, n)
 				local ok = roll < chance
 				Log("INT #%d collective: %s -> %s chance=%d roll=%d %s", n, Name(leader), Name(mate), chance, roll, ok and "JOINS" or "no")
 				if ok then
-					st_mercs[#st_mercs + 1] = mate
+					st_winners[#st_winners + 1] = mate
 					joined[#joined + 1] = mate
 				end
 			end
@@ -1034,14 +1039,18 @@ local function AIActionRegisters(unit)
 	return E.IsAITurnEnemy(unit) and true or false
 end
 
--- A merc's action in its own turn registers AP with the enemies that see it (IIS).
-local function RegisterMercAction(action_id, unit, ap)
-	if IIS.Config.system ~= "IIS" or not IIS.Config.enemy_interrupts then return end
-	if action_id == "Move" or (ap or 0) <= 0 or IISControl.Active() or not E.IsPlayerTurnMerc(unit) then return end
+local function RegisterActionLogged(unit, action_id, ap)
 	local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
 	if not ok then
 		Log("RegisterAction failed: %s", tostring(err))
 	end
+end
+
+-- A merc's action in its own turn registers AP with the enemies that see it (IIS).
+local function RegisterMercAction(action_id, unit, ap)
+	if IIS.Config.system ~= "IIS" or not IIS.Config.enemy_interrupts then return end
+	if action_id == "Move" or (ap or 0) <= 0 or IISControl.Active() or not E.IsPlayerTurnMerc(unit) then return end
+	RegisterActionLogged(unit, action_id, ap)
 end
 
 function OnMsg.RunCombatAction(action_id, unit, ap)
@@ -1057,10 +1066,7 @@ function OnMsg.RunCombatAction(action_id, unit, ap)
 		tostring(action_id), Name(unit), FormatAP(ap), AP(unit), Pos(unit),
 		tostring(behavior and (behavior.id or behavior.class)), StatusList(unit))
 	if IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0 and AIActionRegisters(unit) then
-		local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
-		if not ok then
-			Log("RegisterAction failed: %s", tostring(err))
-		end
+		RegisterActionLogged(unit, action_id, ap)
 	end
 end
 
