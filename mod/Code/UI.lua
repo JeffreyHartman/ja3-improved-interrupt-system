@@ -232,8 +232,8 @@ function UI.Begin(it, banner)
 	end)
 	safe(it, "UI combat log", function()
 		local units = it:Interrupters()
-		CombatLog("important", T{Untranslated("<names> <verb> <mover>."), names = NamesText(units),
-			verb = #units == 1 and "interrupts" or "interrupt", mover = it:Mover():GetLogName()})
+		CombatLog("important", T{Untranslated("<names> <verb> <mover>."), names = Untranslated(NamesText(units)),
+			verb = Untranslated(#units == 1 and "interrupts" or "interrupt"), mover = it:Mover():GetLogName()})
 	end)
 	Log("INT #%d UI shown: banner=%s portraits_refreshed=%d camera=%s", it:Number(), tostring(banner_shown),
 		portraits, tostring(camera))

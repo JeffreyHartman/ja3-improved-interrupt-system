@@ -8,11 +8,19 @@ function RGBA(r, g, b, a)
 	return { r, g, b, a }
 end
 HUDMercClass = { SetupStyle = function() end }
+-- The debug build of JA3 logs a Lua error when a T{} parameter is a plain string, so the fake T fails on one.
+local UntranslatedMeta = { __tostring = function(u) return u.s end }
 function Untranslated(s)
-	return s
+	return setmetatable({ s = s }, UntranslatedMeta)
 end
 function T(o)
-	return (o[1]:gsub("<(%w+)>", function(k) return tostring(o[k]) end))
+	local text = getmetatable(o[1]) == UntranslatedMeta and o[1].s or o[1]
+	return (text:gsub("<(%w+)>", function(k)
+		if type(o[k]) == "string" then
+			error("T{} parameter '" .. k .. "' is a plain string", 0)
+		end
+		return tostring(o[k])
+	end))
 end
 function HideTacticalNotification() end
 function GetAllPlayerUnitsOnMap() return {} end
@@ -35,7 +43,7 @@ local function BeginText(names)
 	for i, name in ipairs(names) do
 		interrupters[i] = Merc(name)
 	end
-	local mover = { GetLogName = function() return "Legion Goon" end }
+	local mover = { GetLogName = function() return Untranslated("Legion Goon") end }
 	IIS.UI.Begin(IISInterrupt.Begin{ n = 1, mover = mover, interrupters = interrupters, cfg = IIS.Config })
 	return combat_log[1]
 end
@@ -49,7 +57,7 @@ end)
 t.case("UI.End: the combat log text is the same for every end reason", function()
 	combat_log = {}
 	IIS.UI.End(IISInterrupt.Begin{ n = 1, mover = {}, interrupters = {}, cfg = IIS.Config })
-	t.eq(combat_log[1], "Interrupt over.")
+	t.eq(tostring(combat_log[1]), "Interrupt over.")
 end)
 
 t.case("UI.Begin: a request banner shows its label and the interrupter names in place of INTERRUPT!", function()
@@ -63,7 +71,7 @@ t.case("UI.Begin: a request banner shows its label and the interrupter names in 
 	IIS.UI.Begin(IISInterrupt.Begin{ n = 2, mover = { GetLogName = function() return "Legion Goon" end },
 		interrupters = { Merc("Pie"), Merc("Livewire") }, cfg = IIS.Config }, "Overwatch")
 	Presets, ShowTacticalNotification = nil, nil
-	t.eq(shown[1], "Overwatch: Pie")
+	t.eq(tostring(shown[1]), "Overwatch: Pie")
 	t.eq(shown[2], "preset")
-	t.eq(shown[3], "Overwatch: Pie and Livewire")
+	t.eq(tostring(shown[3]), "Overwatch: Pie and Livewire")
 end)
