@@ -42,6 +42,7 @@ The options list shows each group of options in one color: one color for the Int
 |---|---|---|---|
 | Interrupt System (Experimental) | Interrupt System | IIS | IIS, JA2 Classic or Off. |
 | Collective interrupts (IIS) | Interrupt System | on | Teammates within 5 tiles of a winner can join. |
+| Enemy interrupts | Interrupt System | on | Enemies can interrupt a merc in your turn, with the same rules as mercs. The merc stops on its tile, and the AI plays the enemies that won. |
 | Interrupted enemy | Interrupt System | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
 | IIS reaction time | Interrupt System | 25 | Lower values give more interrupts. |
 | IIS AP registered (%) | Interrupt System | 60 | Higher values give more interrupts. |

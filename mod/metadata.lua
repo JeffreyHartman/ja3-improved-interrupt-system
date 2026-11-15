@@ -21,6 +21,7 @@ return PlaceObj('ModDef', {
 	},
 	'default_options', {
 		Collective = true,
+		EnemyInterrupts = true,
 		AfterInterrupt = "Stop",
 		ReactionTime = 25,
 		BasicPercent = 60,

@@ -18,6 +18,12 @@ function IISControl.Active()
 	return active
 end
 
+-- The active interrupt when it is a Player interrupt, or false. The overrides that hand the
+-- engine to merc interrupters apply only to it.
+local function PlayerInterrupt()
+	return active and not active:IsEnemy() and active or false
+end
+
 --- Returns the number of the last interrupt that started, or 0 before the first one.
 function IISControl.InterruptCount()
 	return interrupt_count
@@ -341,7 +347,10 @@ IISControl.HANDLED = "iis_handled"
 --     whose unit (entry[2]) is an interrupter, and the wrapper changes its type to
 --     IISControl.HANDLED.
 --   `dummy`: the step of the mover's path where the interrupt caught it, or nil
---   `stop`: true to stop the mover at `dummy` when the interrupt ends
+--   `enemy`: true for an Enemy interrupt. The mover is a merc, the vanilla AI plays the
+--     interrupters in a new game-time thread, and the interrupt ends when the AI returns.
+--   `stop`: true to stop the mover at `dummy` when the interrupt ends, or at its start for an
+--     Enemy interrupt
 --   `label`, `where`: the text of the BEGIN log line before and after the mover's state
 --   `notes`: an optional text for each interrupter, at the end of its interrupter log line
 --   `banner`: optional, the banner shows "<banner>: <interrupter names>" in place of "INTERRUPT!"
@@ -432,6 +441,38 @@ local function Run(mover, req, n)
 	end
 end
 
+--- Runs the vanilla AI for the interrupters of the Enemy interrupt `it` and ends the interrupt
+-- when the AI returns. Called in its own game-time thread (ADR 0003).
+function IISControl.RunEnemyAI(it)
+	if active ~= it then return end
+	SafeCall(it, "AI run", function()
+		Log("INT #%d AI runs for %s", it:Number(), NameList(it:Living()))
+		E.RunAI(it:Living(), it:Mover())
+	end)
+	IISControl.EndInterrupt(it, "ai_done")
+end
+
+-- Stops the merc on its step in its own command thread, so that its move ends, and starts the AI
+-- of the interrupters in a new thread.
+local function RunEnemy(mover, req, n)
+	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = IIS.Config, enemy = true }
+	Log("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s", n, req.label, Name(mover), Pos(mover), AP(mover), req.where or "")
+	local notes = req.notes or empty_table
+	for i, m in ipairs(it:Interrupters()) do
+		local free = 0
+		SafeCall(nil, "RemoveFreeMove", function()
+			free = IISControl.RemoveFreeMove(m)
+		end)
+		local free_mark = free > 0 and string.format(" (free move %s removed)", IIS.FormatAP(free)) or ""
+		Log("INT #%d   interrupter %d: %s ap=%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark)
+	end
+	IISControl.Activate(it, req.dummy, req)
+	if req.stop then
+		SafeCall(it, "StopMover", IISControl.StopMover, it, req.dummy)
+	end
+	CreateGameTimeThread(IISControl.RunEnemyAI, it)
+end
+
 local function Start(mover, entries, entry_type, handler)
 	if not can_yield() then
 		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
@@ -458,11 +499,15 @@ local function Start(mover, entries, entry_type, handler)
 		end
 	end
 	interrupt_count = n
-	Run(mover, req, n)
+	if req.enemy then
+		RunEnemy(mover, req, n)
+	else
+		Run(mover, req, n)
+	end
 end
 
 -- The entry types in the order that their handlers run. Other types run after them, in list order.
-local type_order = { overwatch = 1, iis = 2 }
+local type_order = { overwatch = 1, iis = 2, iis_enemy = 3 }
 
 -- Returns the entries of `list` that have a handler, in groups of one entry type and one step
 -- (entry[4]). The groups are sorted by type_order and then by list order.
@@ -558,7 +603,9 @@ function IISControl.EndInterrupt(it, reason)
 	end
 
 	GiveBackEngine(it, taken)
-	SafeCall(it, "UI.End", IIS.UI.End, it)
+	if not it:IsEnemy() then
+		SafeCall(it, "UI.End", IIS.UI.End, it)
+	end
 
 	local forced = {}
 	for k, v in pairs(counters.forced) do
@@ -592,14 +639,15 @@ end
 -- move. The path table is the local "path" of Unit:CombatGoto, so it changes in place.
 function IISControl.StopMover(it, dummy)
 	local mover = it:Mover()
+	local role = it:IsEnemy() and "merc" or "enemy"
 	if not IsValid(mover) or mover:IsDead() then return end
 	if mover.command ~= "CombatGoto" or not E.InCommandThread(mover) then
-		Log("INT #%d enemy %s not stopped: command is %s", it:Number(), Name(mover), tostring(mover.command))
+		Log("INT #%d %s %s not stopped: command is %s", it:Number(), role, Name(mover), tostring(mover.command))
 		return
 	end
 	local path = mover.combat_path
 	if type(path) ~= "table" or #path == 0 or type(dummy) ~= "table" or not dummy.pos then
-		Log("INT #%d enemy %s not stopped: no path", it:Number(), Name(mover))
+		Log("INT #%d %s %s not stopped: no path", it:Number(), role, Name(mover))
 		return
 	end
 	-- A walk step between two path nodes can lie between tiles, and paths_ap has costs only for tiles.
@@ -611,7 +659,7 @@ function IISControl.StopMover(it, dummy)
 		local prev_cost = obj:GetAP(path[1])
 		local new_cost = obj:GetAP(here)
 		if not new_cost then
-			Log("INT #%d enemy %s: no path cost at the stop tile %s, no refund", it:Number(), Name(mover), tostring(tile))
+			Log("INT #%d %s %s: no path cost at the stop tile %s, no refund", it:Number(), role, Name(mover), tostring(tile))
 		end
 		if prev_cost and new_cost and new_cost < prev_cost then
 			refund = prev_cost - new_cost
@@ -628,7 +676,7 @@ function IISControl.StopMover(it, dummy)
 	table.iclear(path)
 	path[1] = here
 	mover.iis_stopped = mover.command_thread
-	Log("INT #%d enemy %s stops at %s (%d path nodes dropped), refund=%s AP, ap now %s", it:Number(), Name(mover),
+	Log("INT #%d %s %s stops at %s (%d path nodes dropped), refund=%s AP, ap now %s", it:Number(), role, Name(mover),
 		tostring(tile), steps_left - 1, IIS.FormatAP(refund), AP(mover))
 end
 
@@ -689,18 +737,22 @@ end
 
 local orig_IsNetPlayerTurn = IsNetPlayerTurn
 function IsNetPlayerTurn(...)
-	if active then
+	if PlayerInterrupt() then
 		Forced("IsNetPlayerTurn")
 		return true
 	end
 	return orig_IsNetPlayerTurn(...)
 end
 
--- Vanilla refuses every unit while g_AIExecutionController exists. During an interrupt, the
--- interrupters can be controlled and the other player units cannot.
+-- Vanilla refuses every unit while g_AIExecutionController exists. During a Player interrupt, the
+-- interrupters can be controlled and the other player units cannot. During an Enemy interrupt, no
+-- player unit can, also before the AI controller exists.
 local orig_CanBeControlled = Unit.CanBeControlled
 function Unit:CanBeControlled(...)
 	local it = active
+	if it and it:IsEnemy() and self.team and self.team.control == "UI" then
+		return false, "iis_enemy_interrupt"
+	end
 	if it and self.team and self.team.control == "UI" then
 		if it:CanAct(self) then
 			Forced("CanBeControlled")
@@ -715,7 +767,7 @@ end
 -- action never gets there during the interrupt. Only the interrupters count here.
 local orig_CombatActionCannotBeStarted = CombatActionCannotBeStarted
 function CombatActionCannotBeStarted(action_id, unit)
-	local it = active
+	local it = PlayerInterrupt()
 	if it and g_Combat and it:IsInterrupter(unit) then
 		for _, m in ipairs(it:Interrupters()) do
 			local state = CombatActions_RunningState[m]
@@ -730,7 +782,7 @@ end
 
 local orig_NetStartCombatAction = NetStartCombatAction
 function NetStartCombatAction(action_id, unit, ap, args, ...)
-	local it = active
+	local it = PlayerInterrupt()
 	if not it then
 		return orig_NetStartCombatAction(action_id, unit, ap, args, ...)
 	end
@@ -747,8 +799,21 @@ function NetStartCombatAction(action_id, unit, ap, args, ...)
 end
 
 local orig_StartCombatAction = StartCombatAction
+local function CancelAction(it, action_id, unit)
+	local canceled = rawget(_G, "ActionCanceled")
+	if canceled then
+		SafeCall(it, "ActionCanceled", canceled, action_id, unit)
+	end
+end
+
 function StartCombatAction(action_id, unit, ap, ...)
 	local it = active
+	if it and it:IsEnemy() and unit and unit.team and unit.team.control == "UI" then
+		Log("INT #%d %s of %s refused: enemy interrupt", it:Number(), tostring(action_id), Name(unit))
+		CancelAction(it, action_id, unit)
+		return
+	end
+	it = PlayerInterrupt()
 	if not (it and g_Combat and it:IsInterrupter(unit)) then
 		return orig_StartCombatAction(action_id, unit, ap, ...)
 	end
@@ -759,10 +824,7 @@ function StartCombatAction(action_id, unit, ap, ...)
 		local ok, allowed = SafeCall(it, "action limit", limit, action_id, target)
 		if not (ok and allowed) then
 			Log("INT #%d %s of %s refused by the action limit", it:Number(), tostring(action_id), Name(unit))
-			local canceled = rawget(_G, "ActionCanceled")
-			if canceled then
-				SafeCall(it, "ActionCanceled", canceled, action_id, unit)
-			end
+			CancelAction(it, action_id, unit)
 			return
 		end
 	end
@@ -778,7 +840,7 @@ function StartCombatAction(action_id, unit, ap, ...)
 end
 
 local function OnInterrupterActionStep(unit, what)
-	local it = active
+	local it = PlayerInterrupt()
 	if not it or not it:IsInterrupter(unit) then return end
 	it:Activity()
 	if what == "end" then
@@ -806,7 +868,7 @@ end
 -- enemy stays in its command until the interrupt ends.
 local orig_IsIdleOrRunningBehavior = Unit.IsIdleOrRunningBehavior
 function Unit:IsIdleOrRunningBehavior(...)
-	local it = active
+	local it = PlayerInterrupt()
 	if it and self == it:Mover() then
 		Forced("TargetIdle")
 		return true
@@ -818,7 +880,7 @@ end
 -- enemy waits for the interrupt. An interrupter waits only for the other interrupters.
 local orig_WaitOtherCombatActionsEnd = WaitOtherCombatActionsEnd
 function WaitOtherCombatActionsEnd(unit)
-	local it = active
+	local it = PlayerInterrupt()
 	if not (it and it:IsInterrupter(unit)) then
 		return orig_WaitOtherCombatActionsEnd(unit)
 	end
@@ -842,7 +904,7 @@ end
 -- (IModeCombatMovement.lua:522).
 local orig_OnMouseButtonDown = IModeCombatMovement.OnMouseButtonDown
 function IModeCombatMovement:OnMouseButtonDown(pt, button, obj)
-	local it = active
+	local it = PlayerInterrupt()
 	if not it or not g_Teams or not it:Top().team then
 		return orig_OnMouseButtonDown(self, pt, button, obj)
 	end
@@ -863,6 +925,10 @@ end
 local orig_EndTurn = NetSyncEvents.EndTurn
 function NetSyncEvents.EndTurn(player_id, ...)
 	local it = active
+	if it and it:IsEnemy() and player_id == netUniqueId then
+		Log("INT #%d End Turn ignored: enemy interrupt", it:Number())
+		return
+	end
 	if it and player_id == netUniqueId then
 		local press = it:EndTurnPressed()
 		if press == "requested" then
@@ -911,7 +977,7 @@ end
 -- Portraits and number keys already ask CanBeControlled. This catches any other way to select a
 -- player unit that is not an interrupter.
 function OnMsg.SelectionChange()
-	local it = active
+	local it = PlayerInterrupt()
 	if not it then return end
 	local sel = SelectedObj
 	if IsKindOf(sel, "Unit") and sel.team and sel.team.control == "UI" and not it:IsInterrupter(sel) then

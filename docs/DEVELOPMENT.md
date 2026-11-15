@@ -40,6 +40,12 @@ A request can also have these fields for each interrupter:
 
 The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter in `IIS.lua`. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move. A merc on Overwatch (`E.Overwatch`) never wins and never joins, also when it has AP.
 
+### Enemy interrupts
+
+When the mover is a merc in the player turn and the "Enemy interrupts" option is on, `IIS.Watchers` gives the AI units (`E.AIUnits`), and the checks use the same rules as for a merc watcher. `IIS.ObserverSkipReason` refuses neutral units (`E.IsNeutral`) and units that are not hostile to the merc, such as militia and AI allies. A win adds an `"iis_enemy"` entry. `IIS.InterruptRequest` handles it too, and its request has `enemy = true` and no collective joiners.
+
+For a request with `enemy = true`, `IISControl` does not wait in the merc's command thread (ADR 0003). It makes the Enemy interrupt the active interrupt, stops the merc at once, and starts a game-time thread that calls `IISControl.RunEnemyAI`. That function calls `E.RunAI(units, camera_obj)`, which runs `AIExecutionController:Execute` for the interrupters that can act, and then ends the interrupt with the reason `ai_done`. The tests replace `E.RunAI` with a fake. `Interrupt:IsEnemy()` is true for an Enemy interrupt. The overrides that give the engine to merc interrupters apply only to a Player interrupt. During an Enemy interrupt, no player unit can be controlled or start an action, and End Turn does nothing.
+
 The handler for `"overwatch"` entries is `IOS.InterruptRequest` in `IOS.lua`. `IOS.Install` registers it when the IOS option is on, on `ModsReloaded` and when the options change. When the option is off, no handler is registered, and vanilla gets each `"overwatch"` entry unchanged. The handler:
 
 - takes each entry of a merc (a unit of a UI-controlled team) on Overwatch whose pool can pay for one default attack. An entry of an enemy overwatcher goes to vanilla unchanged;

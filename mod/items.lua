@@ -16,6 +16,12 @@ return {
 		'Help', "When a merc wins an interrupt, teammates within 5 tiles can join it. The chance comes from Leadership, levels, Agility and Wisdom. GBO 4 does not change this option.",
 		'DefaultValue', true,
 	}),
+	PlaceObj('ModItemOptionToggle', {
+		'name', "EnemyInterrupts",
+		'DisplayName', "<color AmmoHPColor>Enemy interrupts</color>",
+		'Help', "Enemies can interrupt a merc in your turn, with the same rules as mercs. An enemy that wins uses the AP that it kept from its own turn, and the AI picks its actions. The merc stops on its tile and gets back the AP for the rest of its path. This option does nothing when the Interrupt System is Off. GBO 4 does not change this option.",
+		'DefaultValue', true,
+	}),
 	PlaceObj('ModItemOptionChoice', {
 		'name', "AfterInterrupt",
 		'DisplayName', "<color AmmoHPColor>Interrupted enemy</color>",
