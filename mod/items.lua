@@ -13,7 +13,13 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "Collective",
 		'DisplayName', "<color AmmoHPColor>Collective interrupts (IIS)</color>",
-		'Help', "When a merc wins an interrupt, teammates within 5 tiles can join it. The chance comes from Leadership, levels, Agility and Wisdom. GBO 4 does not change this option.",
+		'Help', "When a merc or an enemy wins an interrupt, teammates within 5 tiles can join it. A joiner must be on the team of the winner. The chance comes from Leadership, levels, Agility and Wisdom. GBO 4 does not change this option.",
+		'DefaultValue', true,
+	}),
+	PlaceObj('ModItemOptionToggle', {
+		'name', "EnemyInterrupts",
+		'DisplayName', "<color AmmoHPColor>Enemy interrupts</color>",
+		'Help', "Enemies can interrupt a merc in your turn, with the same rules as mercs. An enemy that wins uses the AP that it kept from its own turn, and the AI picks its actions. The merc stops on its tile and gets back the AP for the rest of its path. An Enemy Interrupt banner shows while the AI plays, and then the merc stays selected if it can still act. This option applies only to IIS and JA2 Classic interrupts. It does nothing when the Interrupt System is Off. GBO 4 does not change this option.",
 		'DefaultValue', true,
 	}),
 	PlaceObj('ModItemOptionChoice', {
@@ -47,7 +53,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "InterruptAimLimit",
 		'DisplayName', "<color AmmoHPColor>Interrupt aim limit</color>",
-		'Help', "The part of the weapon's aim levels that a merc can use in an IIS or JA2 Classic interrupt, rounded up. It simulates a merc that has no time for a full aim. A weapon with 3 aim levels gets 1, 2, 3 or 3 levels. Under GBO 4, a weapon has up to 10 aim levels, so 25% of 10 levels gives 3. The limit never goes below the minimum aim of the shot.",
+		'Help', "The part of the weapon's aim levels that a merc or an enemy can use in an IIS or JA2 Classic interrupt, rounded up. It simulates a merc that has no time for a full aim. A weapon with 3 aim levels gets 1, 2, 3 or 3 levels. Under GBO 4, a weapon has up to 10 aim levels, so 25% of 10 levels gives 3. The limit never goes below the minimum aim of the shot.",
 		'DefaultValue', "100%",
 		'ChoiceList', {
 			"25%",

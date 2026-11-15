@@ -34,11 +34,25 @@ A request can also have these fields for each interrupter:
 | `ap_grants[unit]` | A raw AP value. At the start, `IISControl` sets the interrupter's AP to the grant. At the end, it puts back the AP that the interrupter had before the grant. It writes `ActionPoints` directly, because `Unit:GainAP` does nothing for a unit on Overwatch. The AP of a queued action that did not start goes back to the grant in the same way. |
 | `on_end(ap_left, started)` | A function. At the end, `IISControl` calls it with the raw AP that each granted interrupter had left, and the list of the action IDs that each interrupter started. A queued action that did not start is not in the list. |
 | `banner` | A text. The banner shows "`banner`: interrupter names" in place of "INTERRUPT!". |
-| `aim_limit` | A percent. The maximum aim level of each interrupter is this percent of the maximum that the game gives, rounded up, and never below the minimum. The `"iis"` handler gives the "Interrupt aim limit" option, and the `"overwatch"` handler gives the "IOS aim limit" option, both read when the interrupt starts. |
+| `aim_limit` | A percent. The maximum aim level of each interrupter is this percent of the maximum that the game gives, rounded up, and never below the minimum. The `"iis"` and `"iis_enemy"` handlers give the "Interrupt aim limit" option, and the `"overwatch"` handler gives the "IOS aim limit" option, both read when the interrupt starts. |
 | `free_aim` | A function `free_aim(unit, action, target)` that returns a number of aim levels. The minimum aim level of each interrupter is at least this number, and never above the maximum that the game gives. The levels up to the minimum cost no AP, because `Unit:GetAttackAPCost` charges only for the levels above the minimum. The `"overwatch"` handler gives the higher of the "IOS free aim levels" option, read when the interrupt starts, and the Killzone value. |
 | `action_limits[unit]` | A function `limit(action_id, target)`. The `StartCombatAction` override calls it before it takes the AP. When the limit does not return true, or fails, the action does not start and costs no AP. |
 
 The handler for `"iis"` entries is `IIS.InterruptRequest`, the 1.13 trigger adapter in `IIS.lua`. It refuses an entry from an older version, drops the winners that can no longer act, rolls the collective joiners and commits the counters in the Watcher memory. It sends Stop when the "Interrupted enemy" option is "Stop" and the trigger is a move. A merc on Overwatch (`E.Overwatch`) never wins and never joins, also when it has AP.
+
+### Enemy interrupts
+
+When the mover is a merc in the player turn and the "Enemy interrupts" option is on, `IIS.Watchers` gives the AI units (`E.AIUnits`), and the checks use the same rules as for a merc watcher. `IIS.ObserverSkipReason` refuses neutral units (`E.IsNeutral`) and units that are not hostile to the merc, such as militia and AI allies. A win adds an `"iis_enemy"` entry. `IIS.InterruptRequest` handles it too, and its request has `enemy = true` and no collective joiners.
+
+For a request with `enemy = true`, `IISControl` does not wait in the merc's command thread (ADR 0003). It makes the Enemy interrupt the active interrupt, and it stops the merc if the merc moves (the command of a merc that attacks ends by itself). Then it starts a game-time thread that calls `IISControl.RunEnemyAI`. That function calls `E.RunAI(units, camera_obj)`, which runs `AIExecutionController:Execute` for the interrupters that can act, and then ends the interrupt with the reason `ai_done`. A second thread (`IISControl.WatchEnemyAI`) ends the interrupt with the reason `ai_timeout` after `enemy_ai_timeout_ms` (45 s of game time) and calls `E.StopAI`. The tests replace `E.RunAI` with a fake, and they call the real `E.RunAI` and `E.StopAI` with a fake AI controller. `Interrupt:IsEnemy()` is true for an Enemy interrupt. The overrides that give the engine to merc interrupters apply only to a Player interrupt. During an Enemy interrupt, no player unit can be controlled or start an action, and End Turn does nothing. `OnMsg.CanSaveGameQuery` blocks saves, and a load ends the interrupt with the reason `load`, so the AI does not run.
+
+The interrupt shows the banner "Enemy Interrupt" (`UI.BeginEnemy`, `UI.EndEnemy`). At the end, `EndInterrupt` selects the interrupted merc again when it is valid, alive and not down. The AI run can change the selection.
+
+In JA2 Classic, an enemy gets its point for a team that saw the merc (`E.TeamSees`). A merc's attack causes the after-attack check in IIS and in JA2 Classic. The interrupt after an attack does not stop the merc, because the request sets `stop` only for a move. In IIS, a merc's actions register AP only when the "Enemy interrupts" option is on. Collective joiners of an enemy winner must be on its team, and the interrupter list can hold more than one unit. The moving-target penalty applies to an enemy interrupter's shot too.
+
+An enemy that is on Overwatch and triggers on the same step as an enemy interrupt fires first, and the log says "same step as vanilla X, vanilla runs first". A merc that the Overwatch downs gets no interrupt.
+
+When `AIExecutionController:Execute` fails, `E.RunAI` calls `E.StopAI`, and the interrupt ends with the reason `ai_error`. `E.StopAI` removes the AI controller, turns the camera back to the merc and gives control back to the player. At the time-out, the mod also sends each interrupter that still runs a command to `Idle` ("sending X to Idle"). In IIS, the move of an interrupter registers the AP of each step with the mercs that see it, but its check starts no interrupt. Vanilla gives 0 AP at the turn start to a unit whose Overwatch has not expired, and an Overwatch from the player turn expires one combat turn later. Thus at the end of an Enemy interrupt, the Overwatch of each interrupter expires at its next turn start ("Overwatch ends at its next turn start"), and the AP that it spent does not come out of its next turn.
 
 The handler for `"overwatch"` entries is `IOS.InterruptRequest` in `IOS.lua`. `IOS.Install` registers it when the IOS option is on, on `ModsReloaded` and when the options change. When the option is off, no handler is registered, and vanilla gets each `"overwatch"` entry unchanged. The handler:
 
@@ -67,13 +81,13 @@ These overrides change behavior only while an interrupt is active:
 | Override | Why |
 |---|---|
 | `IsNetPlayerTurn` | Returns true. The UI and the action start code ask it whose turn it is. |
-| `Unit:CanBeControlled` | True for the interrupters. False, with the reason `iis_not_interrupter`, for the other player units. |
+| `Unit:CanBeControlled` | True for the interrupters. False, with the reason `iis_not_interrupter`, for the other player units. During an Enemy interrupt it is false for every player unit, with the reason `iis_enemy_interrupt`. |
 | `CombatActionCannotBeStarted` | Counts only the interrupters' running actions. The frozen enemy's action never ends during the interrupt. |
-| `StartCombatAction` | Runs the interrupters' actions in a queue with the vanilla start rule. It refuses an action that the interrupter's action limit refuses. |
+| `StartCombatAction` | Runs the interrupters' actions in a queue with the vanilla start rule. It refuses an action that the interrupter's action limit refuses. During an Enemy interrupt it refuses every action of a player unit and logs `refused: enemy interrupt`. |
 | `Unit:IsIdleOrRunningBehavior` | Returns true for the frozen enemy, because `Unit:FirearmAttack` waits until its target is idle. |
 | `WaitOtherCombatActionsEnd` | An interrupter waits only for the other interrupters. |
 | `IModeCombatMovement:OnMouseButtonDown` | Sets `g_CurrentTeam` to the player team during the click handler. |
-| `NetSyncEvents.EndTurn`, `NetSyncLocalEffects.EndTurn` | End the interrupt instead of the turn. |
+| `NetSyncEvents.EndTurn`, `NetSyncLocalEffects.EndTurn` | End a Player interrupt instead of the turn. During an Enemy interrupt they do nothing and log `End Turn ignored: enemy interrupt`. |
 | `HUDMercClass.SetupStyle` (in `UI.lua`) | Marks the portraits. |
 | `OnMsg.CanSaveGameQuery` | Blocks saves during an interrupt. |
 
@@ -129,6 +143,8 @@ For a quick combat test, open the Mod Editor from the main menu. Its Cheats menu
 
 All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LUA ERROR]` lines with their stack, and mod load errors.
 
+The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP by `const.Scale.AP`). GBO 4 changes that scale and keeps raw AP, so with GBO 4 the log AP values are 10 times the vanilla values. For example, `110->1.8` is 11 vanilla AP at the start and 0.18 at the end, and `165/121` is 16.5 of a maximum of 12.1. Divide by 10 before you compare a GBO 4 log with a vanilla log or with an attack cost in vanilla AP.
+
 | Line | Meaning |
 |---|---|
 | `loaded`, `control loaded`, `IOS loaded`, `UI loaded` | The game ran the code files. Each hook status must say `ours`. `IOS loaded` gives the IOS option. |
@@ -147,6 +163,11 @@ All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LU
 | `INT #N aim range failed` | The free aim levels or the aim limit failed with a Lua error. The shot gets the aim range of the game. |
 | `attack cost lookup failed for` | The game call for the default attack cost of a unit failed with a Lua error. Each unit writes this line once per combat turn. The unit cannot win an IIS or JA2 Classic interrupt (`attack cost unknown`). |
 | `INT #- <type> handler failed` | A provoke-list handler failed. Vanilla gets the entries of that group. |
+| `INT #N UI enemy banner` | The "Enemy Interrupt" banner showed or did not show. |
+| `INT #N AI runs for` | The AI starts for the interrupters of an Enemy interrupt. |
+| `INT #N ... refused: enemy interrupt` | A player unit tried an action during an Enemy interrupt. The action did not start. |
+| `INT #N End Turn ignored: enemy interrupt` | The player pressed End Turn during an Enemy interrupt. Nothing happened. |
+| `same step as vanilla ..., vanilla runs first` | An enemy on Overwatch triggered on the same step as an enemy interrupt. The Overwatch fires first. |
 | `INT #N collective` | A collective interrupt roll, or the reason that a teammate did not roll. |
 | `INT #N run action`, `action ended` | An interrupter action started or ended. |
 | `INT #N waiting` | The state of a waiting interrupt. It is written when the state changes, and every 30 seconds. |

@@ -239,6 +239,20 @@ function UI.Begin(it, banner)
 		portraits, tostring(camera))
 end
 
+--- Shows the "Enemy Interrupt" banner for the Enemy interrupt `it`.
+function UI.BeginEnemy(it)
+	banner_text = Untranslated("Enemy Interrupt")
+	local shown = false
+	IIS.SafeCall(it, "UI banner", function()
+		shown = UI.ShowBanner()
+	end)
+	Log("INT #%d UI enemy banner: %s", it:Number(), tostring(shown))
+end
+
+function UI.EndEnemy(it)
+	IIS.SafeCall(it, "UI banner", UI.HideBanner)
+end
+
 -- Called when an action ends, a merc goes down or End Turn is pressed.
 function UI.Refresh(it)
 	if IISControl.Active() ~= it then

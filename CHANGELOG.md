@@ -4,6 +4,17 @@ This file lists the changes in each version of the mod. The format follows [Keep
 
 A version is `version_major.version_minor` and a patch number. The game shows the build number, which is `version` in `mod/metadata.lua`. When you bump `version`, add a section here.
 
+## Unreleased
+
+### Added
+
+- Enemy interrupts. An enemy that sees a merc move or attack can interrupt it in your turn, with the rules of IIS or JA2 Classic. The merc stops on its tile, and the AI plays the enemies that won. The "Enemy interrupts" option, on by default, turns this on or off. It applies only to IIS and JA2 Classic (#44).
+- An "Enemy Interrupt" banner shows while the AI plays an enemy interrupt. After it, the merc stays selected if it can still act (#52).
+- A merc's attack causes an interrupt check, in IIS and in JA2 Classic. An enemy interrupt after an attack does not stop the merc (#48).
+- Collective interrupts work for enemy winners. A joiner must be on the team of the winner (#49).
+- The "Interrupt aim limit" option and the moving target penalty apply to enemy interrupters too (#50).
+- An enemy interrupt ends after 45 seconds if the AI does not finish. Enemy Overwatch fires before an enemy interrupt on the same step, and a merc that it downs gets no interrupt. The mod blocks saves during an enemy interrupt, and a load ends it (#51).
+
 ## 0.8.2 (build 14), not released
 
 ### Fixed

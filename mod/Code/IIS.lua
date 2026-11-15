@@ -1,6 +1,6 @@
--- Improved Interrupt System: player-controlled interrupts in the style of JA2 1.13.
+-- Improved Interrupt System: interrupts in the style of JA2 1.13, by mercs and by AI enemies.
 -- This file holds the settings, the log, the trigger checks and the IISControl handler for "iis"
--- entries. Rules.lua has the 1.13 formulas, Memory.lua has the Watcher memory, Control.lua runs an
+-- and "iis_enemy" entries. Rules.lua has the 1.13 formulas, Memory.lua has the Watcher memory, Control.lua runs an
 -- interrupt and UI.lua shows it.
 --
 -- A trigger is an entry { "iis", top_merc, info, dummy } that the wrapper of
@@ -16,6 +16,7 @@ local Mem = IISMemory
 IIS.Config = {
 	system = "IIS",              -- "IIS" (the 1.13 default), "JA2 Classic" or "Off"
 	collective = true,           -- IIS collective interrupts, ALLOW_COLLECTIVE_INTERRUPTS
+	enemy_interrupts = true,     -- AI units hostile to the player can interrupt a merc in the player turn
 	after_interrupt = "stop",    -- "stop": the enemy stays on its tile and gets back the AP of the rest of its path; "continue": it walks on
 	auto_end_delay_ms = 1500,    -- game time after the last action before the auto end ends the interrupt
 	reaction_time = 25,          -- BASIC_REACTION_TIME_LENGTH
@@ -25,6 +26,7 @@ IIS.Config = {
 	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
+	enemy_ai_timeout_ms = 45000, -- game time after which an Enemy interrupt whose AI run has not returned ends
 	ios = false,                 -- IOS: the Overwatch trigger of a merc starts an interrupt (IOS.lua)
 	ios_actions = "shot",        -- "shot": an overwatcher can only shoot in its cone or reload; "any": any action (IOS.lua)
 	ios_aim_limit = 100,         -- percent of the maximum aim levels that an overwatcher can use (Aim.lua)
@@ -58,6 +60,7 @@ local function ApplyOptions()
 	-- The options menu shows this value, and it stores the value when the player applies a change.
 	rawset(o, "InterruptSystem", cfg.system)
 	cfg.collective = o.Collective ~= false
+	cfg.enemy_interrupts = o.EnemyInterrupts ~= false
 	cfg.after_interrupt = o.AfterInterrupt == "Continue" and "continue" or "stop"
 	cfg.reaction_time = tonumber(o.ReactionTime) or 25
 	cfg.basic_pct = tonumber(o.BasicPercent) or 60
@@ -171,6 +174,58 @@ end
 
 function E.CanControlTeam(unit)
 	return unit.team and unit.team.control == "UI"
+end
+
+function E.AIUnits()
+	local units = {}
+	for _, team in ipairs(g_Teams or empty_table) do
+		if team.control ~= "UI" then
+			for _, u in ipairs(team.units or empty_table) do
+				units[#units + 1] = u
+			end
+		end
+	end
+	return units
+end
+
+function E.IsNeutral(unit)
+	return unit.team and unit.team.side == "neutral" or false
+end
+
+function E.IsPlayerTurnMerc(unit)
+	return E.CanControlTeam(unit) and g_Teams[g_CurrentTeam] == unit.team or false
+end
+
+--- Runs the vanilla AI for `units` until it finishes, in the calling game-time thread.
+-- When the AI is done, the controller turns the camera back to `camera_obj`. When `Execute`
+-- fails, E.StopAI cleans up and the error goes to the caller.
+function E.RunAI(units, camera_obj)
+	local controller = CreateAIExecutionController{ label = "IISEnemyInterrupt" }
+	controller.restore_camera_obj = camera_obj
+	local ok, err = pcall(controller.Execute, controller, units)
+	if not ok then
+		E.StopAI(nil, camera_obj)
+		error(err, 0)
+	end
+	DoneObject(controller)
+end
+
+--- Stops an AI run that did not return or failed: deletes its thread `thread`, removes the AI
+-- controller, turns the camera back to `camera_obj` and gives control back to the player.
+function E.StopAI(thread, camera_obj)
+	if IsValidThread(thread) and thread ~= CurrentThread() then
+		DeleteThread(thread)
+	end
+	-- AIExecutionController:Done turns the camera to restore_camera_obj (CombatCamera.lua:605).
+	if g_AIExecutionController then
+		g_AIExecutionController.restore_camera_obj = camera_obj or g_AIExecutionController.restore_camera_obj
+		DoneObject(g_AIExecutionController)
+	elseif camera_obj then
+		AdjustCombatCamera("reset", nil, camera_obj, nil, nil, "noFitCheck")
+	end
+	if g_Combat and not g_Combat.is_player_control then
+		g_Combat:SetPlayerControl(true)
+	end
 end
 
 function E.IsAITurnEnemy(unit)
@@ -431,10 +486,25 @@ end
 -- Statuses that take a merc out of player control.
 local blocking_status = { "Unconscious", "Downed", "Panicked", "Berserk", "Blinded" }
 
+-- The candidate watchers for a mover's checks, collective joiners and IIS registration.
+-- Mercs watch an AI mover, and AI units watch a merc.
+function IIS.Watchers(mover)
+	if IIS.IsPlayerSide(mover) then
+		return E.AIUnits()
+	end
+	return E.PlayerUnits()
+end
+
+-- True when w is a merc, which sets the side flag of w in the JA2 Classic duel.
+function IIS.IsPlayerSide(w)
+	return E.CanControlTeam(w) and true or false
+end
+
 -- A watcher whose AP the mover's actions can register (IIS) or who can duel (JA2 Classic).
 function IIS.ObserverSkipReason(w, mover)
 	if not IsValid(w) or w:IsIncapacitated() then return "incapacitated" end
-	if not E.CanControlTeam(w) then return "not player controlled" end
+	if IIS.IsPlayerSide(w) == IIS.IsPlayerSide(mover) then return "same side as mover" end
+	if E.IsNeutral(w) then return "neutral" end
 	if not w:IsOnEnemySide(mover) then return "not enemies" end
 end
 
@@ -457,6 +527,15 @@ function IIS.WinSkipReason(w, system)
 	end
 end
 
+-- The mover checks that are the same for a merc mover and an AI mover.
+function IIS.SharedMoverSkipReason(mover)
+	if mover.command == "Reposition" or g_AIExecutionController and g_AIExecutionController.reposition then
+		return "reposition phase"
+	end
+	if IsSetpiecePlaying() then return "setpiece" end
+	if IISControl.Active() then return "interrupt active" end
+end
+
 function IIS.MoverSkipReason(mover, trigger_type, visible_only, return_result)
 	local cfg = IIS.Config
 	if cfg.system == "Off" then return "interrupt system off" end
@@ -465,12 +544,23 @@ function IIS.MoverSkipReason(mover, trigger_type, visible_only, return_result)
 	if return_result then return "preview" end
 	if visible_only then return "visible_only" end
 	if not g_Combat or g_StartingCombat then return "not in combat" end
+	if IIS.IsPlayerSide(mover) then
+		return IIS.MercMoverSkipReason(mover)
+	end
 	if not g_AIExecutionController then return "no AI turn" end
-	if g_AIExecutionController.reposition or mover.command == "Reposition" then return "reposition phase" end
-	if IsSetpiecePlaying() then return "setpiece" end
-	if IISControl.Active() then return "interrupt active" end
+	local skip = IIS.SharedMoverSkipReason(mover)
+	if skip then return skip end
 	if not E.IsAITurnEnemy(mover) then return "mover is not on the AI team that has the turn" end
 	if mover.opportunity_attack then return "mover is in an opportunity attack" end
+end
+
+-- The rest of MoverSkipReason for a merc mover, whose checks can start an enemy interrupt.
+function IIS.MercMoverSkipReason(mover)
+	if not IIS.Config.enemy_interrupts then return "enemy interrupts off" end
+	local skip = IIS.SharedMoverSkipReason(mover)
+	if skip then return skip end
+	if not E.IsPlayerTurnMerc(mover) then return "mover is not on the player team that has the turn" end
+	if g_AIExecutionController then return "AI controller running" end
 end
 
 ------------------------------------------------------------------------------------------------
@@ -500,7 +590,7 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 	local running = IsRunning(mover, dummies, first)
 	local rows = {}
 	local start_target = { pos = mover:GetPos(), stance = mover.stance }
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(mover)) do
 		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, "JA2 Classic")
 		if not skip and (E.SeesNow(w, mover) or Mem.SeenThisTurn(w, mover)) then
 			skip = "saw mover this turn"
@@ -527,10 +617,11 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 				local _, m_dark = E.Sight(mover, w)
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = true, saw_before = Mem.SeenBefore(w, mover) }),
+					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover),
+						team_knows = E.TeamSees(w.team, mover) }),
 					{ passive = true, distance = d, max_visible = max_visible, dark = w_dark, other_saw_me = Mem.SeenBefore(mover, w) })
 				local mp = R.ClassicPoints(
-					IIS.ClassicSoldier(mover, { stance = dummy.stance or mover.stance, running = running,
+					IIS.ClassicSoldier(mover, { is_player = IIS.IsPlayerSide(mover), stance = dummy.stance or mover.stance, running = running,
 						saw_before = Mem.SeenBefore(mover, w), team_knows = E.TeamSees(mover.team, w) }),
 					{ passive = false, distance = d, max_visible = max_visible, dark = m_dark, other_saw_me = Mem.SeenBefore(w, mover) })
 				local m_sees_w = E.MoverSeesWatcher(mover, dummy, w)
@@ -555,7 +646,7 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 	local rc = IIS.RulesConfig()
 	local first = FirstStep(mover, dummies)
 	local rows = {}
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(mover)) do
 		local skip = IIS.ObserverSkipReason(w, mover)
 		if skip then
 			Count(stats.watcher_skips, skip)
@@ -605,7 +696,7 @@ function IIS.FindAttackTrigger(mover, n)
 	local stats = IIS.turn_stats
 	local targets = IIS.attack_targets[mover] or {}
 	local rows = {}
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(mover)) do
 		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, system)
 		local targeted = targets[w] or false
 		if skip then
@@ -621,10 +712,11 @@ function IIS.FindAttackTrigger(mover, n)
 				local d = E.DistTiles(w, mover:GetPos())
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = true, saw_before = Mem.SeenBefore(w, mover) }),
+					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover),
+						team_knows = E.TeamSees(w.team, mover) }),
 					{ passive = true, distance = d, max_visible = max_visible, other_saw_me = true })
 				local mp = R.ClassicPoints(
-					IIS.ClassicSoldier(mover, { saw_before = true, team_knows = true }),
+					IIS.ClassicSoldier(mover, { is_player = IIS.IsPlayerSide(mover), saw_before = true, team_knows = true }),
 					{ passive = false, distance = d, max_visible = max_visible, other_saw_me = Mem.SeenBefore(w, mover) })
 				local won, margin, how = R.ClassicDuel(wp, mp, true, true)
 				local row = { unit = w, won = won, margin = margin, how = how,
@@ -665,7 +757,22 @@ local function RowList(rows)
 	return table.concat(parts, "; ")
 end
 
--- Adds a "iis" entry to the vanilla interrupt list when a trigger is found.
+-- True when `unit` is an interrupter of the active Enemy interrupt.
+local function IsEnemyInterrupter(unit)
+	local it = IISControl.Active()
+	return it and it:IsEnemy() and it:IsInterrupter(unit) or false
+end
+
+-- IIS: the move plan of an Enemy interrupt's interrupter registers the AP of each step with the mercs
+-- that see it. Its winners start nothing, because interrupts do not nest before counter-interrupts (#16).
+local function PlanInterrupterMove(mover, dummies, n)
+	IIS.LogCommit(Mem.PlanMove(mover, nil, mover:GetPos()), "next check", mover)
+	local _, _, _, plan = IIS.FindIISMoveTrigger(mover, dummies, n)
+	Mem.PlanMove(mover, plan)
+end
+
+-- Adds a "iis" entry to the vanilla interrupt list when a trigger is found, or an "iis_enemy" entry
+-- when the mover is a merc.
 function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_result, interrupts, provoke_idx)
 	local stats = IIS.turn_stats
 	stats.calls = stats.calls + 1
@@ -675,6 +782,10 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	end
 	if skip then
 		Count(stats.mover_skips, skip)
+		if skip == "interrupt active" and trigger_type == "move" and IIS.Config.system == "IIS" and #(dummies or {}) >= 2
+			and E.InCommandThread(mover) and IsEnemyInterrupter(mover) then
+			PlanInterrupterMove(mover, dummies, IIS.check_count)
+		end
 		if trigger_type == "attack reaction" and not return_result then
 			Log("after-attack check by %s skipped: %s", Name(mover), skip)
 		end
@@ -715,27 +826,34 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	end
 
 	stats.triggers = stats.triggers + 1
-	local mercs = {}
+	local winner_units = {}
 	for i, row in ipairs(winners) do
-		mercs[i] = row.unit
+		winner_units[i] = row.unit
 	end
 	local where = trigger_type == "move"
 		and string.format("step %d/%d pos=%s", idx, #dummies, tostring(dummies[idx].pos))
 		or "after its attack"
-	local info = { kind = trigger_type == "move" and "move" or "attack", system = system, mercs = mercs,
-		winners = winners, rows = rows, step = idx, check = n, where = where }
-	local entry = { "iis", mercs[1], info, dummies[idx] }
+	local is_enemy_interrupt = IIS.IsPlayerSide(mover)
+	local info = { kind = trigger_type == "move" and "move" or "attack", system = system, mercs = winner_units,
+		winners = winners, rows = rows, step = idx, check = n, where = where, enemy = is_enemy_interrupt }
+	local entry = { is_enemy_interrupt and "iis_enemy" or "iis", winner_units[1], info, dummies[idx] }
 
 	if interrupts and provoke_idx < idx then
 		Log("check #%d %s mover=%s: %d winner(s) at %s, but a vanilla interrupt (%s) comes first at step %d. Ours waits for the next check.",
-			n, system, Name(mover), #mercs, where, tostring(interrupts[1][1]), provoke_idx)
+			n, system, Name(mover), #winner_units, where, tostring(interrupts[1][1]), provoke_idx)
 		return interrupts, provoke_idx
 	end
 	if real then
 		Log("check #%d %s TRIGGER mover=%s at %s: %s", n, system, Name(mover), where, RowList(winners))
 	else
 		-- AIExecutionController:SelectPlayingUnits runs the same check to group its units.
-		Log("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(mercs))
+		Log("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(winner_units))
+	end
+	-- The provoke-list wrapper starts an Enemy interrupt after the vanilla entries (Control.lua).
+	if interrupts and provoke_idx == idx and is_enemy_interrupt then
+		Log("check #%d   same step as vanilla %s, vanilla runs first", n, tostring(interrupts[1][1]))
+		interrupts[#interrupts + 1] = entry
+		return interrupts, provoke_idx
 	end
 	if interrupts and provoke_idx == idx then
 		table.insert(interrupts, 1, entry)
@@ -748,19 +866,22 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	return { entry }, idx
 end
 
--- IIS collective interrupts (Soldier Control.cpp:24960): teammates within 5 tiles of an original
--- winner join it by chance.
-local function AddCollective(st_mercs, mover, n)
+-- IIS collective interrupts (Soldier Control.cpp:24960): teammates of an original winner within 5 tiles of it
+-- join by chance. This holds for merc winners and enemy winners.
+local function AddCollective(st_winners, mover, n)
 	local rc = IIS.RulesConfig()
 	local originals = {}
-	for i, m in ipairs(st_mercs) do
+	for i, m in ipairs(st_winners) do
 		originals[i] = m
 	end
 	local joined = {}
 	for _, leader in ipairs(originals) do
-		for _, mate in ipairs(E.PlayerUnits()) do
-			local skip = table.find(st_mercs, mate) and "interrupter"
+		for _, mate in ipairs(IIS.Watchers(mover)) do
+			local skip = table.find(st_winners, mate) and "interrupter"
 				or IIS.ObserverSkipReason(mate, mover) or IIS.WinSkipReason(mate, "IIS")
+			if not skip and mate.team ~= leader.team then
+				skip = "other team"
+			end
 			if not skip then
 				local dist = E.DistTiles(leader, mate:GetPos())
 				if dist > rc.collective_radius then
@@ -779,7 +900,7 @@ local function AddCollective(st_mercs, mover, n)
 				local ok = roll < chance
 				Log("INT #%d collective: %s -> %s chance=%d roll=%d %s", n, Name(leader), Name(mate), chance, roll, ok and "JOINS" or "no")
 				if ok then
-					st_mercs[#st_mercs + 1] = mate
+					st_winners[#st_winners + 1] = mate
 					joined[#joined + 1] = mate
 				end
 			end
@@ -788,9 +909,10 @@ local function AddCollective(st_mercs, mover, n)
 	return joined
 end
 
---- The IISControl handler for "iis" entries. Returns the interrupt request for the winners of the
--- check that can still act and the collective joiners, or nil for an entry from an older version
--- or when no winner can act.
+--- The IISControl handler for "iis" and "iis_enemy" entries. Returns the interrupt request for the
+-- winners of the check that can still act and the collective joiners, or nil for an entry from an
+-- older version or when no winner can act. An "iis_enemy" entry gives an Enemy interrupt, which
+-- always stops a merc that moves.
 -- It calls IISMemory.Fired for the interrupters and logs the commit. `n` is the interrupt number
 -- for the collective log lines.
 function IIS.InterruptRequest(mover, entry, n)
@@ -836,8 +958,9 @@ function IIS.InterruptRequest(mover, entry, n)
 	return {
 		interrupters = interrupters,
 		dummy = dummy,
-		stop = cfg.after_interrupt == "stop" and info.kind == "move",
-		label = info.system .. " " .. info.kind,
+		enemy = info.enemy or false,
+		stop = info.kind == "move" and (info.enemy or cfg.after_interrupt == "stop"),
+		label = info.system .. (info.enemy and " enemy " or " ") .. info.kind,
 		where = info.where,
 		notes = notes,
 		aim_limit = cfg.interrupt_aim_limit,
@@ -848,6 +971,7 @@ end
 -- after it runs the code files of all mods.
 function OnMsg.ModsReloaded()
 	IISControl.Handle("iis", IIS.InterruptRequest)
+	IISControl.Handle("iis_enemy", IIS.InterruptRequest)
 end
 
 local orig_CheckProvokeOpportunityAttacks = Unit.CheckProvokeOpportunityAttacks
@@ -877,7 +1001,7 @@ IIS.attack_targets = IIS.attack_targets or {}
 function IIS.RegisterAction(unit, action_id, ap)
 	local ap113 = R.To113AP(ap)
 	local parts = {}
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(unit)) do
 		if not IIS.ObserverSkipReason(w, unit) and E.SeesNow(w, unit) then
 			local pct = IIS.RegisteredPercent(w, unit, unit:GetPos())
 			local add = R.IISRegisteredAP(ap113, pct)
@@ -904,25 +1028,50 @@ local function IsTracedEnemy(unit)
 	return g_Combat and IsKindOf(unit, "Unit") and unit.team and not E.CanControlTeam(unit)
 end
 
+-- True when unit is an AI unit whose actions register AP with the mercs: an enemy in its AI turn,
+-- or an interrupter of an Enemy interrupt.
+local function AIActionRegisters(unit)
+	if not g_AIExecutionController then return false end
+	local it = IISControl.Active()
+	if it and it:IsEnemy() then
+		return IsEnemyInterrupter(unit)
+	end
+	return E.IsAITurnEnemy(unit) and true or false
+end
+
+local function RegisterActionLogged(unit, action_id, ap)
+	local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
+	if not ok then
+		Log("RegisterAction failed: %s", tostring(err))
+	end
+end
+
+-- A merc's action in its own turn registers AP with the enemies that see it (IIS).
+local function RegisterMercAction(action_id, unit, ap)
+	if IIS.Config.system ~= "IIS" or not IIS.Config.enemy_interrupts then return end
+	if action_id == "Move" or (ap or 0) <= 0 or IISControl.Active() or not E.IsPlayerTurnMerc(unit) then return end
+	RegisterActionLogged(unit, action_id, ap)
+end
+
 function OnMsg.RunCombatAction(action_id, unit, ap)
-	if not g_Combat or not IsValid(unit) or not unit.team or E.CanControlTeam(unit) then return end
+	if not g_Combat or not IsValid(unit) or not unit.team then return end
 	IIS.attack_targets[unit] = nil
+	if E.CanControlTeam(unit) then
+		RegisterMercAction(action_id, unit, ap)
+		return
+	end
 	Count(IIS.turn_stats.enemy_actions, unit)
 	local behavior = unit.ai_context and unit.ai_context.behavior
 	Log("enemy action %s unit=%s cost=%s ap_left=%s pos=%s behavior=%s status=%s",
 		tostring(action_id), Name(unit), FormatAP(ap), AP(unit), Pos(unit),
 		tostring(behavior and (behavior.id or behavior.class)), StatusList(unit))
-	if IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0
-		and g_AIExecutionController and E.IsAITurnEnemy(unit) then
-		local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
-		if not ok then
-			Log("RegisterAction failed: %s", tostring(err))
-		end
+	if IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0 and AIActionRegisters(unit) then
+		RegisterActionLogged(unit, action_id, ap)
 	end
 end
 
 function OnMsg.Attack(action, results, attack_args, combat_starting, attacker, target)
-	if not g_Combat or not IsKindOf(attacker, "Unit") or not attacker.team or E.CanControlTeam(attacker) then return end
+	if not g_Combat or not IsKindOf(attacker, "Unit") or not attacker.team then return end
 	local set = IIS.attack_targets[attacker] or {}
 	IIS.attack_targets[attacker] = set
 	if IsKindOf(target, "Unit") then
@@ -1075,8 +1224,8 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: system=%s collective=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s ios_free_aim=%s ios_full_aim=%s",
-		why, c.system, tostring(c.collective), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
+	Log("%s: system=%s collective=%s enemy_interrupts=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s ios_free_aim=%s ios_full_aim=%s",
+		why, c.system, tostring(c.collective), tostring(c.enemy_interrupts), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
 		tostring(c.moving_target_penalty),
 		tostring(c.log_checks), tostring(c.ios), c.ios_actions, tostring(c.ios_aim_limit), tostring(c.interrupt_aim_limit),
 		tostring(c.ios_free_aim), tostring(c.ios_full_aim))

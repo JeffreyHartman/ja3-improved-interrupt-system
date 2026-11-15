@@ -87,11 +87,16 @@ function CreateGameTimeThread(f, ...)
 	threads_started[#threads_started + 1] = table.pack(f, ...)
 end
 
+-- Runs each started thread as a coroutine. A thread that yields stays suspended for good, as a hung
+-- game thread does.
 local function RunThreads()
 	local list = threads_started
 	threads_started = {}
 	for _, th in ipairs(list) do
-		th[1](table.unpack(th, 2, th.n))
+		local ok, err = coroutine.resume(coroutine.create(th[1]), table.unpack(th, 2, th.n))
+		if not ok then
+			error(err, 0)
+		end
 	end
 end
 
@@ -154,7 +159,7 @@ local function vanilla_prepare_attack_args(unit, action_id, args)
 	return attack_args
 end
 -- Like vanilla, the fake list function attacks for each "overwatch" entry and adds every entry to
--- the mover's passed_interrupts.
+-- the mover's passed_interrupts. It calls vanilla_result.on_attack(entry) at each attack.
 Unit = {
 	CheckProvokeOpportunityAttacks = function()
 		return vanilla_result.interrupts, vanilla_result.idx
@@ -164,6 +169,9 @@ Unit = {
 		for _, data in ipairs(list) do
 			if data[1] == "overwatch" then
 				vanilla_attacks[#vanilla_attacks + 1] = data[2]
+				if vanilla_result.on_attack then
+					vanilla_result.on_attack(data)
+				end
 			end
 			mover.passed_interrupts = mover.passed_interrupts or {}
 			table.insert(mover.passed_interrupts, data)
@@ -220,6 +228,10 @@ local Mem = IISMemory
 local player_team = { side = "player1", control = "UI" }
 local enemy_team = { side = "enemy1", control = "AI" }
 
+-- The player and its allies are one camp, as in JA3. Neutral units are hostile to every camp here,
+-- so that only the mod's own neutral check keeps them out.
+local camps = { player1 = "player", ally = "player", enemy1 = "enemy", enemy2 = "enemy", neutral = "neutral" }
+
 local function FakeUnit(o)
 	local u = {
 		kinds = { Unit = true },
@@ -247,7 +259,7 @@ local function FakeUnit(o)
 	end
 	function u:IsIncapacitated() return self.down or false end
 	function u:IsDead() return self.dead or false end
-	function u:IsOnEnemySide(other) return self.team.side ~= other.team.side end
+	function u:IsOnEnemySide(other) return camps[self.team.side] ~= camps[other.team.side] end
 	function u:HasNightVision() return false end
 	function u:GetPos() return self.pos end
 	function u:GetVisualPos() return self.pos end
@@ -281,7 +293,7 @@ local function EndActive()
 end
 
 local function ResetWorld()
-	world = { players = {}, los = {}, sees = {}, mover_sees = {}, cone = {}, rand = 99 }
+	world = { players = {}, ai_units = {}, ai_runs = {}, player_turn = false, los = {}, sees = {}, mover_sees = {}, cone = {}, rand = 99 }
 	Q.attack_targets = {}
 	EndActive()
 	gv_IIS = {}
@@ -295,6 +307,7 @@ local function ResetWorld()
 	vanilla_attacks = {}
 	Q.Config.system = "IIS"
 	Q.Config.collective = true
+	Q.Config.enemy_interrupts = true
 	Q.ResetTurnStats()
 	CombatActions_RunningState = {}
 	ran_actions = {}
@@ -305,7 +318,17 @@ end
 
 E.PlayerUnits = function() return world.players end
 E.CanControlTeam = function(u) return u.team.control == "UI" end
-E.IsAITurnEnemy = function(u) return u.team.control ~= "UI" end
+E.AIUnits = function() return world.ai_units end
+E.IsAITurnEnemy = function(u) return u.team.control ~= "UI" and not world.player_turn end
+E.IsPlayerTurnMerc = function(u) return u.team.control == "UI" and world.player_turn end
+local real_RunAI, real_StopAI = E.RunAI, E.StopAI
+-- Records each AI run and plays world.ai_script(units) in place of the vanilla AI.
+E.RunAI = function(units, camera_obj)
+	world.ai_runs[#world.ai_runs + 1] = { units = units, camera_obj = camera_obj, active = IISControl.Active() }
+	if world.ai_script then
+		world.ai_script(units)
+	end
+end
 E.MaxAPRaw = function(u) return u.max_ap end
 E.StepRaw = function(stance) return stance == "Crouch" and 1500 or 1000 end
 E.WalkRaw = function() return 1000 end
@@ -324,7 +347,8 @@ E.WatcherSeesStep = function(w, mover, dummy)
 	return row and dummy.i and row[dummy.i] or false
 end
 E.MoverSeesWatcher = function(mover, dummy, w) return world.mover_sees[w] ~= false end
-E.TeamSees = function() return false end
+-- world.team_sees[team][unit] is true when the team has seen the unit.
+E.TeamSees = function(team, u) return world.team_sees and world.team_sees[team] and world.team_sees[team][u] or false end
 E.IsCurrentPos = function(mover, pos) return pos == mover.pos end
 E.SameTile = function(a, b) return a ~= nil and b ~= nil and a.x == b.x and a.y == b.y end
 E.Key = function(u) return u.session_id end
@@ -574,7 +598,7 @@ t.case("MoverSkipReason refuses previews, other triggers, player units and the r
 	t.eq(Q.MoverSkipReason(mover, "attack interrupt"), "trigger attack interrupt")
 	t.eq(Q.MoverSkipReason(mover, "move", nil, "any"), "preview")
 	t.eq(Q.MoverSkipReason(mover, "move", true), "visible_only")
-	t.eq(Q.MoverSkipReason(FakeUnit({ id = "merc" }), "move"), "mover is not on the AI team that has the turn")
+	t.eq(Q.MoverSkipReason(FakeUnit({ id = "merc" }), "move"), "mover is not on the player team that has the turn")
 	g_AIExecutionController = { reposition = true }
 	t.eq(Q.MoverSkipReason(mover, "move"), "reposition phase")
 	g_AIExecutionController = false
@@ -3062,4 +3086,646 @@ end
 t.case("Free aim: Killzone without GBO 4 gives 1 level, and the option value when it is higher", function()
 	t.eq(VanillaKillzoneAimRange({ IOSFreeAim = "0" }), 1)
 	t.eq(VanillaKillzoneAimRange({ IOSFreeAim = "2" }), 2)
+end)
+
+t.case("Watchers: a merc is on the player side and an enemy is not, and each watches only the other side", function()
+	local alive = function() return false end
+	local merc = { team = { control = "UI" }, IsIncapacitated = alive }
+	local enemy = { team = { control = "AI" }, IsIncapacitated = alive }
+	merc.IsOnEnemySide = function() return true end
+	t.eq(Q.IsPlayerSide(merc), true)
+	t.eq(Q.IsPlayerSide(enemy), false)
+	t.eq(Q.ObserverSkipReason(merc, enemy), nil)
+	t.eq(Q.ObserverSkipReason(merc, merc), "same side as mover")
+end)
+
+------------------------------------------------------------------------------------------------
+-- Enemy interrupts
+
+local militia_team = { side = "ally", control = "AI" }
+local neutral_team = { side = "neutral", control = "AI" }
+
+-- A merc in the player turn walking a path of 6 steps in its own CombatGoto command, and an enemy
+-- that watches it with reaction time 27 and registers 6 AP per step. With a counter of 10, the
+-- enemy wins on step 4. The path costs 6 AP to the end and 3 AP to step 4.
+local function WalkingMerc(counter, watcher)
+	ResetWorld()
+	g_AIExecutionController = false
+	world.player_turn = true
+	local merc = FakeUnit({ id = "merc", pos = { x = 0, y = 0 }, max_ap = 12000 })
+	local o = { id = "e", team = enemy_team, level = 5, agility = 80, ap = 10000, pos = { x = 0, y = 6 } }
+	for k, v in pairs(watcher or {}) do
+		o[k] = v
+	end
+	local e = FakeUnit(o)
+	world.ai_units = { e }
+	world.los[e] = Steps(2, 3, 4, 5, 6)
+	E.Dist = function() return 6 end
+	if counter then
+		Mem.Register(e, merc, counter)
+	end
+	local dummies = Path(merc, 6)
+	merc.in_cmd = true
+	merc.command = "CombatGoto"
+	merc.command_thread = "cmd"
+	merc.combat_path = { "dest", "mid", "start" }
+	merc.combat_path_obj = { GetAP = function(_, p) return p == "dest" and 6000 or 3000 end }
+	merc.start_move_free_ap = 0
+	return merc, e, dummies
+end
+
+-- Sends the move check and the provoke list of the merc's path, as CombatGoto does.
+local function MercMoves(merc, dummies)
+	local list = Unit.CheckProvokeOpportunityAttacks(merc, nil, "move", dummies)
+	if list then
+		Unit.ProvokeOpportunityAttacksFromList(merc, list)
+	end
+	return list
+end
+
+t.case("Enemy interrupt: an enemy wins an IIS move check, the merc stops with the AP of the rest of its path, and the AI run gets the winner", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	local n = IISControl.InterruptCount() + 1
+	MercMoves(merc, dummies)
+	t.eq(LogHas("check #%d+ IIS TRIGGER mover=merc#merc at step 4/6"), true)
+	t.eq(#merc.combat_path, 1)
+	t.eq(merc.combat_path[1], dummies[4].pos)
+	t.eq(merc.ActionPoints, 13000)
+	t.eq(#world.ai_runs, 0)
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(#world.ai_runs[1].units, 1)
+	t.eq(world.ai_runs[1].units[1], e)
+	t.eq(world.ai_runs[1].camera_obj, merc)
+	t.eq(LogHas("INT #" .. n .. " BEGIN IIS enemy move: mover=merc#merc"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 1: e#e"), true)
+	t.eq(LogHas("INT #" .. n .. " END %(ai_done%)"), true)
+	t.eq(Mem.Counter(e, merc), 0)
+end)
+
+t.case("Enemy interrupt: player orders and End Turn do nothing from the stop until the AI run returns, then player control comes back", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local other = FakeUnit({ id = "other" })
+	FakeControl()
+	MercMoves(merc, dummies)
+	t.eq(Unit.CanBeControlled(merc), false)
+	t.eq(Unit.CanBeControlled(other), false)
+	t.eq(NetSyncEvents.EndTurn(netUniqueId), nil)
+	StartCombatAction("Move", merc, 1000)
+	t.eq(#vanilla_started, 0)
+	t.eq(merc.ActionPoints, 13000)
+	t.eq(IISControl.Active() ~= false, true)
+	world.ai_script = function(units)
+		StartCombatAction("Attack", units[1], 4000)
+		t.eq(Unit.CanBeControlled(merc), false)
+	end
+	RunThreads()
+	t.eq(#vanilla_started, 1)
+	t.eq(vanilla_started[1][2], e)
+	t.eq(IISControl.Active(), false)
+	t.eq(Unit.CanBeControlled(merc), "vanilla")
+	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
+end)
+
+t.case("Enemy interrupt: the notification shows at the start and hides at the end, and the merc is selected after it", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	local shown = {}
+	FakeSelection(merc)
+	Q.UI = {
+		BeginEnemy = function() shown[#shown + 1] = "begin" end,
+		EndEnemy = function() shown[#shown + 1] = "end" end,
+	}
+	world.ai_script = function()
+		shown[#shown + 1] = "ai"
+		SelectedObj = e
+	end
+	MercMoves(merc, dummies)
+	t.eq(table.concat(shown, ","), "begin")
+	RunThreads()
+	t.eq(table.concat(shown, ","), "begin,ai,end")
+	t.eq(SelectedObj, merc)
+	t.eq(IISControl.Active(), false)
+end)
+
+t.case("Enemy interrupt: a merc that went down is not selected after the interrupt", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	FakeSelection(merc)
+	Q.UI = { BeginEnemy = function() end, EndEnemy = function() end }
+	world.ai_script = function()
+		merc.down = true
+		SelectedObj = e
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	t.eq(SelectedObj, e)
+end)
+
+-- True when the merc walks its whole path and no AI run starts.
+local function NoEnemyInterrupt(merc, dummies)
+	FakeControl()
+	local list = MercMoves(merc, dummies)
+	RunThreads()
+	return list == nil and #merc.combat_path == 3 and #world.ai_runs == 0 and IISControl.Active() == false
+end
+
+t.case("Enemy interrupt: an enemy with too little AP, on Overwatch or with a blocking status does not win", function()
+	local merc, _, dummies = WalkingMerc(10, { ap = 3000, attack_cost = 4000 })
+	t.eq(NoEnemyInterrupt(merc, dummies), true)
+	local merc2, e2, dummies2 = WalkingMerc(10)
+	local saved = rawget(_G, "g_Overwatch")
+	g_Overwatch = { [e2] = { num_attacks = 2, triggered_by = {} } }
+	local on_overwatch = NoEnemyInterrupt(merc2, dummies2)
+	g_Overwatch = saved
+	t.eq(on_overwatch, true)
+	local merc3, _, dummies3 = WalkingMerc(10, { statuses = { Panicked = true } })
+	t.eq(NoEnemyInterrupt(merc3, dummies3), true)
+end)
+
+t.case("Enemy interrupt: militia, AI allies and neutral units do not win", function()
+	local ai_ally_team = { side = "player1", control = "AI" }
+	for _, team in ipairs({ militia_team, ai_ally_team, neutral_team }) do
+		local merc, _, dummies = WalkingMerc(10, { team = team })
+		t.eq(NoEnemyInterrupt(merc, dummies), true, team.side)
+	end
+	t.eq(Q.turn_stats.watcher_skips.neutral, 1)
+end)
+
+t.case("Enemy interrupt: with the Enemy interrupts option off, or with Interrupt System = Off, no enemy interrupt starts", function()
+	local merc, _, dummies = WalkingMerc(10)
+	ApplyModOptions({ EnemyInterrupts = false })
+	local option_off = NoEnemyInterrupt(merc, dummies)
+	local skips = Q.turn_stats.mover_skips["enemy interrupts off"]
+	merc, _, dummies = WalkingMerc(10)
+	ApplyModOptions({ InterruptSystem = "Off" })
+	local system_off = NoEnemyInterrupt(merc, dummies)
+	ApplyModOptions({})
+	t.eq(option_off, true)
+	t.eq(skips, 1)
+	t.eq(system_off, true)
+	t.eq(Q.Config.enemy_interrupts, true)
+	t.eq(LoadModFile("mod/metadata.lua").default_options.EnemyInterrupts, true)
+end)
+
+t.case("Enemy interrupt: no check of either side runs while it is active", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local watcher = FakeUnit({ id = "a", pos = { x = 0, y = 6 } })
+	world.players = { watcher, merc }
+	world.los[watcher] = Steps(2, 3, 4, 5, 6)
+	FakeControl()
+	MercMoves(merc, dummies)
+	local merc2 = FakeUnit({ id = "merc2" })
+	Mem.Register(e, merc2, 100)
+	Mem.Register(watcher, e, 100)
+	local lists = {}
+	world.ai_script = function()
+		g_AIExecutionController = {}
+		lists.ai = Q.AddTrigger(e, "move", Path(e, 6))
+		lists.merc = Q.AddTrigger(merc2, "move", Path(merc2, 6))
+		g_AIExecutionController = false
+	end
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(lists.ai, nil)
+	t.eq(lists.merc, nil)
+	t.eq(Q.turn_stats.mover_skips["interrupt active"], 2)
+end)
+
+-- WalkingMerc with an enemy overwatcher whose vanilla Overwatch entry is on step 4, the step of
+-- the enemy interrupt. `on_shot(merc)` runs at the Overwatch shot.
+local function OverwatchOnTheStep(on_shot)
+	local merc, e, dummies = WalkingMerc(10)
+	local o = FakeUnit({ id = "o", team = enemy_team, pos = { x = 6, y = 0 } })
+	vanilla_result.interrupts, vanilla_result.idx = { { "overwatch", o, {}, dummies[4] } }, 4
+	local shot = {}
+	vanilla_result.on_attack = function()
+		shot.active, shot.path_nodes = IISControl.Active(), #merc.combat_path
+		if on_shot then on_shot(merc) end
+	end
+	FakeControl()
+	local list = MercMoves(merc, dummies)
+	return merc, e, dummies, list, shot, o
+end
+
+t.case("Enemy interrupt: a vanilla Overwatch entry on the same step fires before the enemy interrupt starts", function()
+	local merc, e, dummies, list, shot, o = OverwatchOnTheStep()
+	t.eq(#list, 2)
+	t.eq(vanilla_attacks[1], o)
+	t.eq(shot.active, false)
+	t.eq(shot.path_nodes, 3)
+	t.eq(#merc.combat_path, 1)
+	t.eq(merc.combat_path[1], dummies[4].pos)
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(world.ai_runs[1].units[1], e)
+	t.eq(IISControl.Active(), false)
+end)
+
+t.case("Enemy interrupt: a merc that the Overwatch shot downs gets no enemy interrupt", function()
+	local merc = OverwatchOnTheStep(function(m) m.down = true end)
+	RunThreads()
+	t.eq(#world.ai_runs, 0)
+	t.eq(IISControl.Active(), false)
+	t.eq(#merc.combat_path, 3)
+	t.eq(LogHas("interrupt skipped: mover merc#merc cannot act"), true)
+end)
+
+t.case("Enemy interrupt: a hung AI run ends at the time-out with a stuck dump, and player control comes back", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	local stopped = {}
+	local orig_stop = E.StopAI
+	E.StopAI = function() stopped[#stopped + 1] = IISControl.Active() end
+	world.ai_script = function() coroutine.yield() end
+	MercMoves(merc, dummies)
+	RunThreads()
+	E.StopAI = orig_stop
+	t.eq(#world.ai_runs, 1)
+	t.eq(game_time, Q.Config.enemy_ai_timeout_ms)
+	t.eq(LogHas("INT #%d+ STUCK%? the AI run did not return in %d+ms"), true)
+	t.eq(LogHas("INT #%d+ END %(ai_timeout%)"), true)
+	t.eq(#stopped, 1)
+	t.eq(IISControl.Active(), false)
+	t.eq(Unit.CanBeControlled(merc), "vanilla")
+	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
+	game_time = 0
+end)
+
+t.case("Enemy interrupt: an AI run that fails calls E.StopAI and ends the interrupt with the reason ai_error", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	local stopped = 0
+	local orig_stop = E.StopAI
+	E.StopAI = function() stopped = stopped + 1 end
+	world.ai_script = function() error("AI broke") end
+	MercMoves(merc, dummies)
+	local ok = pcall(RunThreads)
+	E.StopAI = orig_stop
+	t.eq(ok, true)
+	t.eq(stopped, 1)
+	t.eq(LogHas("INT #%d+ AI run failed: .*AI broke"), true)
+	t.eq(LogHas("INT #%d+ END %(ai_error%)"), true)
+	t.eq(IISControl.Active(), false)
+	t.eq(Unit.CanBeControlled(merc), "vanilla")
+end)
+
+-- A fake AI controller class for the real E.RunAI and E.StopAI. `execute(controller)` plays
+-- AIExecutionController:Execute, and DoneObject plays AIExecutionController:Done (CombatCamera.lua:601).
+local function FakeAIController(execute)
+	local saved = { CreateAIExecutionController, DoneObject, AdjustCombatCamera, g_AIExecutionController }
+	local fake = { done = {}, camera = {} }
+	function CreateAIExecutionController(o)
+		local c = { label = o.label, restore_camera_obj = false }
+		function c:Execute(units) return execute(self, units) end
+		g_AIExecutionController = c
+		fake.controller = c
+		return c
+	end
+	function DoneObject(c)
+		fake.done[#fake.done + 1] = c
+		if c.restore_camera_obj then
+			fake.camera[#fake.camera + 1] = c.restore_camera_obj
+		end
+		g_AIExecutionController = false
+	end
+	function AdjustCombatCamera(state, _, target)
+		if state == "reset" then
+			fake.camera[#fake.camera + 1] = target
+		end
+	end
+	function fake.restore()
+		CreateAIExecutionController, DoneObject, AdjustCombatCamera, g_AIExecutionController = table.unpack(saved, 1, 4)
+	end
+	return fake
+end
+
+t.case("Enemy interrupt: when Execute fails, E.RunAI removes the AI controller, turns the camera to the merc and gives back player control", function()
+	local merc = FakeUnit({ id = "merc" })
+	g_Combat.is_player_control = true
+	local fake = FakeAIController(function()
+		g_Combat.is_player_control = false
+		error("Execute broke")
+	end)
+	local ok, err = pcall(real_RunAI, {}, merc)
+	fake.restore()
+	t.eq(ok, false)
+	t.eq(tostring(err):find("Execute broke") ~= nil, true)
+	t.eq(#fake.done, 1)
+	t.eq(fake.done[1], fake.controller)
+	t.eq(fake.camera[1], merc)
+	t.eq(g_Combat.is_player_control, true)
+end)
+
+t.case("Enemy interrupt: E.StopAI turns the camera to the merc, with or without an AI controller", function()
+	local merc = FakeUnit({ id = "merc" })
+	local fake = FakeAIController(function() end)
+	CreateAIExecutionController{ label = "hung" }
+	real_StopAI(nil, merc)
+	t.eq(#fake.done, 1)
+	t.eq(fake.camera[1], merc)
+	real_StopAI(nil, merc)
+	fake.restore()
+	t.eq(#fake.done, 1)
+	t.eq(fake.camera[2], merc)
+end)
+
+t.case("Enemy interrupt: at the time-out the AI interrupters stop their commands and E.StopAI gets the merc for the camera", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	local stop_args
+	local orig_stop = E.StopAI
+	E.StopAI = function(thread, camera_obj) stop_args = { camera_obj = camera_obj } end
+	world.ai_script = function()
+		e.command = "CombatGoto"
+		coroutine.yield()
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	E.StopAI = orig_stop
+	game_time = 0
+	t.eq(stop_args.camera_obj, merc)
+	t.eq(e.command, "Idle")
+	t.eq(LogHas("INT #%d+ sending e#e to Idle %(was CombatGoto%)"), true)
+end)
+
+t.case("Enemy interrupt: CanSaveGameQuery blocks saves until the AI run returns", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	MercMoves(merc, dummies)
+	local during, after = {}, {}
+	OnMsg.CanSaveGameQuery(during)
+	RunThreads()
+	OnMsg.CanSaveGameQuery(after)
+	t.eq(during.iis_interrupt, true)
+	t.eq(after.iis_interrupt, nil)
+end)
+
+t.case("Enemy interrupt: a load before the AI run starts ends the interrupt, and the AI does not run", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	MercMoves(merc, dummies)
+	LoadMap(true)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("INT #%d+ END %(load%)"), true)
+	RunThreads()
+	t.eq(#world.ai_runs, 0)
+	t.eq(IISControl.Active(), false)
+	t.eq(game_time, 0)
+end)
+
+-- A merc that is on its way along a path and an AI watcher that never saw it. The watcher and the
+-- merc both have 6 JA2 Classic points at 6 tiles.
+local function ClassicSetup(watcher)
+	local merc, e, dummies = WalkingMerc(nil, watcher)
+	Q.Config.system = "JA2 Classic"
+	-- A path of 5 steps or more is a run, which costs the mover 2 points.
+	return merc, e, { dummies[1], dummies[2], dummies[3], dummies[4] }
+end
+
+t.case("Enemy interrupt, JA2 Classic: an enemy wins the duel on first sight only with the team knowledge point", function()
+	local merc, e, dummies = ClassicSetup()
+	local idx = Q.FindClassicMoveTrigger(merc, dummies, 1)
+	t.eq(idx, nil) -- 6 vs 6, a tie goes to the mover
+	world.team_sees = { [enemy_team] = { [merc] = true } }
+	local winners
+	idx, winners = Q.FindClassicMoveTrigger(merc, dummies, 1)
+	t.eq(idx, 2)
+	t.eq(winners[1].unit, e)
+	t.eq(winners[1].how, "points") -- 7 vs 6
+end)
+
+t.case("Enemy interrupt, JA2 Classic: an enemy that saw the merc this turn does not duel it", function()
+	local merc, e, dummies = ClassicSetup({ level = 9, agility = 95 })
+	Mem.Sees(e, merc)
+	t.eq(Q.FindClassicMoveTrigger(merc, dummies, 1), nil)
+	t.eq(Q.turn_stats.watcher_skips["saw mover this turn"], 1)
+end)
+
+t.case("Enemy interrupt, JA2 Classic: the merc's own points get no enemy bonus from its team", function()
+	local merc, e, dummies = ClassicSetup()
+	world.team_sees = { [player_team] = { [e] = true } }
+	t.eq(Q.FindClassicMoveTrigger(merc, dummies, 1), nil)
+end)
+
+-- A merc that attacked the enemy `e` and was not seen by it, and the attack check of the merc.
+local function MercAttacks(system, watcher)
+	local merc, e, dummies = WalkingMerc(100, watcher)
+	Q.Config.system = system
+	merc.command = "Idle"
+	merc.in_cmd = false
+	OnMsg.RunCombatAction("Attack", merc, 4000)
+	OnMsg.Attack({ id = "Attack" }, {}, {}, false, merc, e)
+	FakeControl()
+	return merc, e, Unit.CheckProvokeOpportunityAttacks(merc, nil, "attack reaction", { merc })
+end
+
+t.case("Enemy interrupt: an enemy wins the check after a merc's attack in IIS", function()
+	local merc, e, list = MercAttacks("IIS")
+	t.eq(list ~= nil and list[1][1], "iis_enemy")
+	t.eq(list[1][2], e)
+	t.eq(list[1][3].kind, "attack")
+end)
+
+t.case("Enemy interrupt: an enemy that was not attacked and does not see the merc wins no IIS check after its attack", function()
+	local merc, e = WalkingMerc(100)
+	merc.command = "Idle"
+	FakeControl()
+	t.eq(Unit.CheckProvokeOpportunityAttacks(merc, nil, "attack reaction", { merc }), nil)
+end)
+
+t.case("Enemy interrupt: an enemy wins the check after a merc's attack in JA2 Classic", function()
+	local merc, e, list = MercAttacks("JA2 Classic", { level = 8 })
+	t.eq(list ~= nil and list[1][1], "iis_enemy")
+	t.eq(list[1][2], e)
+	t.eq(list[1][3].system, "JA2 Classic")
+end)
+
+t.case("Enemy interrupt: a merc action that an enemy sees adds to the counter of that enemy in IIS", function()
+	local merc, e = WalkingMerc(nil)
+	local hidden = FakeUnit({ id = "hidden", team = enemy_team })
+	world.ai_units = { e, hidden }
+	world.sees[e] = { [merc] = true }
+	OnMsg.RunCombatAction("Attack", merc, 4000)
+	t.eq(Mem.Counter(e, merc), 24)
+	t.eq(Mem.Counter(hidden, merc), 0)
+	OnMsg.RunCombatAction("Move", merc, 4000)
+	t.eq(Mem.Counter(e, merc), 24)
+	Q.Config.enemy_interrupts = false
+	OnMsg.RunCombatAction("Attack", merc, 4000)
+	t.eq(Mem.Counter(e, merc), 24)
+end)
+
+t.case("Enemy interrupt: an enemy interrupter's action adds to the counters of the mercs, and no player interrupt starts", function()
+	local merc, e, dummies = WalkingMerc(10)
+	world.players = { merc }
+	world.sees[merc] = { [e] = true }
+	FakeControl()
+	local n = IISControl.InterruptCount()
+	MercMoves(merc, dummies)
+	world.ai_script = function()
+		g_AIExecutionController = {}
+		OnMsg.RunCombatAction("Attack", e, 4000)
+		g_AIExecutionController = false
+		world.during = IISControl.Active()
+	end
+	RunThreads()
+	t.eq(Mem.Counter(merc, e) > 0, true)
+	t.eq(world.during ~= false, true)
+	t.eq(IISControl.InterruptCount(), n + 1)
+end)
+
+t.case("Enemy interrupt: an AI interrupter's move adds the AP of each seen step to the counters of the mercs, and starts no check", function()
+	local merc, e, dummies = WalkingMerc(10)
+	world.players = { merc }
+	FakeControl()
+	local n = IISControl.InterruptCount()
+	MercMoves(merc, dummies)
+	local result = {}
+	world.ai_script = function()
+		g_AIExecutionController = {}
+		local path = Path(e, 6)
+		world.los[merc] = Steps(2, 3, 4, 5, 6)
+		e.in_cmd = true
+		result.list = Unit.CheckProvokeOpportunityAttacks(e, nil, "move", path)
+		e.pos = path[6].pos
+		OnMsg.UnitMovementDone(e)
+		e.in_cmd = false
+		g_AIExecutionController = false
+	end
+	RunThreads()
+	t.eq(result.list, nil)
+	-- 6 registered AP on each of the 5 seen steps, as for the enemy watcher of WalkingMerc.
+	t.eq(Mem.Counter(merc, e), 30)
+	t.eq(IISControl.InterruptCount(), n + 1)
+	t.eq(LogHas("TRIGGER mover=e#e"), false)
+end)
+
+-- Plays the AP rule of vanilla Unit:BeginTurn (Unit.lua:2671, 2692): an Overwatch that has not
+-- expired stays, and then the unit starts its turn with 0 AP.
+local function VanillaBeginTurn(u)
+	local ow = g_Overwatch[u]
+	if ow and not (ow.permanent or ow.expiration_turn > g_Combat.current_turn) then
+		g_Overwatch[u] = nil
+		ow = nil
+	end
+	u.ActionPoints = ow and not ow.permanent and 0 or u.max_ap
+end
+
+t.case("Enemy interrupt: an interrupter that spends all its AP and goes on Overwatch in it starts its next turn with full AP", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	MercMoves(merc, dummies)
+	-- Vanilla Overwatch expires in the round after the one it starts in (UnitOverwatch.lua:210),
+	-- and the enemy turn comes later in the same round as the player turn.
+	local saved_turn = g_Combat.current_turn
+	g_Combat.current_turn = 3
+	world.ai_script = function()
+		e:ConsumeAP(e.ActionPoints)
+		g_Overwatch[e] = { expiration_turn = g_Combat.current_turn + 1, triggered_by = {} }
+	end
+	RunThreads()
+	VanillaBeginTurn(e)
+	g_Combat.current_turn = saved_turn
+	t.eq(e.ActionPoints, e.max_ap)
+	t.eq(g_Overwatch[e], nil)
+end)
+
+t.case("Enemy interrupt: with collective on, an enemy teammate near the winner joins and the AI run gets both", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local mate = FakeUnit({ id = "mate", team = enemy_team, ap = 10000, pos = { x = 0, y = 7 } })
+	world.ai_units = { e, mate }
+	world.rand = 0
+	FakeControl()
+	local n = IISControl.InterruptCount() + 1
+	MercMoves(merc, dummies)
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(#world.ai_runs[1].units, 2)
+	t.eq(world.ai_runs[1].units[1], e)
+	t.eq(world.ai_runs[1].units[2], mate)
+	t.eq(LogHas("INT #" .. n .. " collective: e#e %-> mate#mate chance=%d+ roll=0 JOINS"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 2: mate#mate ap=10 %(collective%)"), true)
+end)
+
+t.case("Enemy interrupt: with collective off, only the winner plays", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local mate = FakeUnit({ id = "mate", team = enemy_team, ap = 10000, pos = { x = 0, y = 7 } })
+	world.ai_units = { e, mate }
+	world.rand = 0
+	Q.Config.collective = false
+	FakeControl()
+	MercMoves(merc, dummies)
+	RunThreads()
+	Q.Config.collective = true
+	t.eq(#world.ai_runs, 1)
+	t.eq(#world.ai_runs[1].units, 1)
+	t.eq(world.ai_runs[1].units[1], e)
+end)
+
+t.case("Enemy interrupt: a joiner must pass the merc joiner checks and be on the winner's team", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local far = FakeUnit({ id = "far", team = enemy_team, ap = 10000, pos = { x = 0, y = 30 } })
+	local tired = FakeUnit({ id = "tired", team = enemy_team, ap = 0, pos = { x = 0, y = 7 } })
+	local other = FakeUnit({ id = "other", team = { side = "enemy2", control = "AI" }, ap = 10000, pos = { x = 0, y = 7 } })
+	world.ai_units = { e, far, tired, other }
+	world.rand = 0
+	FakeControl()
+	MercMoves(merc, dummies)
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(#world.ai_runs[1].units, 1)
+	t.eq(LogHas("collective: e#e %-> far#far skipped: %d+ tiles away"), true)
+	t.eq(LogHas("collective: e#e %-> tired#tired skipped: AP below minimum"), true)
+	t.eq(LogHas("collective: e#e %-> other#other skipped: other team"), true)
+end)
+
+t.case("Enemy interrupt: the aim range of the AI interrupter is limited by the Interrupt aim limit", function()
+	local merc, e, dummies = WalkingMerc(10)
+	e.max_aim = 10
+	ApplyModOptions({ InterruptAimLimit = "50%" })
+	FakeControl()
+	local min, max
+	world.ai_script = function()
+		min, max = AimRange(e)
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	ApplyModOptions({})
+	t.eq(#world.ai_runs, 1)
+	t.eq(min, 0)
+	t.eq(max, 5)
+	t.eq(select(2, AimRange(e)), 10)
+end)
+
+t.case("Enemy interrupt: the aim limit does not apply to an enemy that is not an interrupter, nor to the merc", function()
+	local merc, _, dummies = WalkingMerc(10)
+	merc.max_aim = 10
+	local other = FakeUnit({ id = "other", team = enemy_team })
+	other.max_aim = 10
+	ApplyModOptions({ InterruptAimLimit = "25%" })
+	FakeControl()
+	local other_max, merc_max
+	world.ai_script = function()
+		other_max = select(2, AimRange(other))
+		merc_max = select(2, AimRange(merc))
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	ApplyModOptions({})
+	t.eq(other_max, 10)
+	t.eq(merc_max, 10)
+end)
+
+t.case("Enemy interrupt: an enemy on vanilla Overwatch outside an enemy interrupt keeps its full aim range", function()
+	WalkingMerc(10)
+	local ow = Overwatcher{}
+	ow.max_aim = 10
+	ApplyModOptions({ InterruptAimLimit = "25%", IOSAimLimit = "25%" })
+	t.eq(IISControl.Active() and true or false, false)
+	local min, max = AimRange(ow)
+	ApplyModOptions({})
+	t.eq(min, 0)
+	t.eq(max, 10)
 end)

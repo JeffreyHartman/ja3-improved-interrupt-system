@@ -20,11 +20,13 @@ local Interrupt = {}
 Interrupt.__index = Interrupt
 
 --- Starts an interrupt and returns its Interrupt object.
--- `o` has `n`, `mover`, `interrupters` (the first one is the top interrupter) and `cfg` (IIS.Config).
+-- `o` has `n`, `mover`, `interrupters` (the first one is the top interrupter), `cfg` (IIS.Config)
+-- and `enemy`, true for an Enemy interrupt.
 function M.Begin(o)
 	local it = setmetatable({
 		n = o.n,
 		mover = o.mover,
+		enemy = o.enemy or false,
 		cfg = o.cfg,
 		interrupters = {},
 		is_interrupter = {},
@@ -45,6 +47,11 @@ end
 --- The interrupt number for the log.
 function Interrupt:Number()
 	return self.n
+end
+
+--- True for an Enemy interrupt, false for a Player interrupt.
+function Interrupt:IsEnemy()
+	return self.enemy
 end
 
 --- The unit whose action the interrupt pauses.
