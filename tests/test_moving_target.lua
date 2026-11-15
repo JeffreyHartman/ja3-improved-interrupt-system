@@ -203,3 +203,38 @@ t.case("Moving target: no penalty at a target that is not the mover of the inter
 	t.eq(Penalty(shooter, other), 0)
 	EndActive()
 end)
+
+-- An Enemy interrupt: the merc walks from (sx, sy) to (ex, ey) tiles, and the enemy at (0, 0) interrupts.
+local function EnemyScene(sx, sy, ex, ey)
+	EndActive()
+	local enemy = Unit_("enemy", enemy_team, 0, 0)
+	local merc = Unit_("merc", player_team, sx * tile, sy * tile)
+	OnMsg.UnitAnyMovementStart(merc)
+	merc.pos = { x = ex * tile, y = ey * tile }
+	local it = IISInterrupt.Begin{ n = 1, mover = merc, interrupters = { enemy }, cfg = IIS.Config, enemy = true }
+	IISControl.Activate(it)
+	return enemy, merc
+end
+
+t.case("Moving target: an AI interrupter's shot at the moving merc gets the penalty", function()
+	IIS.Config.moving_target_penalty = 25
+	local enemy, merc = EnemyScene(-10, 10, 0, 10)
+	t.eq(Penalty(enemy, merc), -25)
+	EndActive()
+end)
+
+t.case("Moving target: an AI interrupter's shot at the moving merc gets nothing with the penalty option at 0", function()
+	IIS.Config.moving_target_penalty = 0
+	local enemy, merc = EnemyScene(-10, 10, 0, 10)
+	t.eq(Penalty(enemy, merc), 0)
+	EndActive()
+end)
+
+t.case("Moving target: the merc's shot at the enemy that interrupted it gets no penalty", function()
+	IIS.Config.moving_target_penalty = 25
+	local enemy, merc = EnemyScene(-10, 10, 0, 10)
+	OnMsg.UnitAnyMovementStart(enemy)
+	enemy.pos = { x = 10 * tile, y = 0 }
+	t.eq(Penalty(merc, enemy), 0)
+	EndActive()
+end)
