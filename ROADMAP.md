@@ -14,7 +14,7 @@ Release as a beta when all of these are done.
 - [x] Save and load after a combat with interrupts. A load keeps the IIS counters (#41) and the IOS pool, and a load during an interrupt ends the interrupt (#42). See [save and load research](docs/research/save-load.md).
 - [ ] Play several full combats in a campaign, not only in the mod editor.
 - [ ] Decide how often interrupts must happen, and set the defaults (#2).
-- [ ] Add enemy interrupts. See [Enemy interrupts](#enemy-interrupts).
+- [ ] Add enemy interrupts (#44). See [Enemy interrupts](#enemy-interrupts).
 - [ ] Decide if enemy Overwatch must change when enemy interrupts work. See [Overwatch and the Interrupt System](#overwatch-and-the-interrupt-system).
 - [x] Remove the "End Interrupt at 0 AP" and "Need AP for an attack" options, and always use both rules (#28).
 - [ ] Check the GBO 4 Shooting Stance carry-over. GBO 4 saves the carried AP at the end of the turn, so AP that a merc spends in a later interrupt can carry over too.
@@ -39,12 +39,12 @@ Later:
 
 An enemy interrupts a merc that moves or acts during the player's turn. Without this feature, only the player's side can interrupt, and the game is easier than vanilla.
 
-Open questions:
+Issue #44 has the spec. The decisions:
 
-- The merc's command must stop, the AI must act, and then control must go back to the player.
-- The player's turn has no AI turn loop. The mod must start the AI for the interrupter only.
-- Which player actions register AP with the enemies: moves only, or attacks too.
-- How the camera follows the enemy interrupter.
+- Enemy interrupts work in IIS and JA2 Classic, with the same rules as player interrupts. A new option "Enemy interrupts" turns them on or off.
+- A merc's moves and attacks cause a check. In IIS, every merc action that an enemy sees registers AP with that enemy.
+- An enemy interrupter uses the AP that it kept from its own turn. The AI does not keep AP for interrupts. A playtest measured a median of 2.6 kept AP.
+- The merc stops, and its command ends. Then the vanilla AI plays the interrupters in a new thread (ADR 0003). The AI controller moves the camera, and then the camera goes back to the merc.
 
 Counter-interrupts (#16) need the same parts: the other team acts during an interrupt, and then control comes back. Build enemy interrupts so that #16 can use them.
 

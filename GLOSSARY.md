@@ -53,8 +53,15 @@ A player unit. The word says nothing about the unit's role in an interrupt.
 ### Interrupt
 
 **Interrupt**:
-A pause in a mover's action in which the interrupters act. The mover's action continues when the interrupt ends.
+A pause in a mover's action in which the interrupters act. When the interrupt ends, the mover's action continues or stops.
 _Avoid_: interrupt turn
+
+**Player interrupt**:
+An interrupt in which the interrupters are mercs and the mover is an AI unit.
+
+**Enemy interrupt**:
+An interrupt in which the interrupters are AI units that are hostile to the player, and the mover is a merc. The AI picks the actions of the interrupters.
+_Avoid_: AI interrupt
 
 **End request**:
 The first End Turn press in an interrupt. The interrupt ends when no interrupter is busy.
