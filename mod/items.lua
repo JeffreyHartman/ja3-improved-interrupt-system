@@ -19,7 +19,7 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "EnemyInterrupts",
 		'DisplayName', "<color AmmoHPColor>Enemy interrupts</color>",
-		'Help', "Enemies can interrupt a merc in your turn, with the same rules as mercs. An enemy that wins uses the AP that it kept from its own turn, and the AI picks its actions. The merc stops on its tile and gets back the AP for the rest of its path. An "Enemy Interrupt" banner shows while the AI plays, and then the merc stays selected if it can still act. This option applies only to IIS and JA2 Classic interrupts. It does nothing when the Interrupt System is Off. GBO 4 does not change this option.",
+		'Help', "Enemies can interrupt a merc in your turn, with the same rules as mercs. An enemy that wins uses the AP that it kept from its own turn, and the AI picks its actions. The merc stops on its tile and gets back the AP for the rest of its path. An Enemy Interrupt banner shows while the AI plays, and then the merc stays selected if it can still act. This option applies only to IIS and JA2 Classic interrupts. It does nothing when the Interrupt System is Off. GBO 4 does not change this option.",
 		'DefaultValue', true,
 	}),
 	PlaceObj('ModItemOptionChoice', {
