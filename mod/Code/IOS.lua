@@ -91,24 +91,41 @@ local function KillzoneAim(m, action, target, mover)
 	return aim or 0
 end
 
---- Returns the raw AP pool of an Overwatch state.
--- The stored pool is used only when the game has not changed the attack count or the turn since
--- IOS stored it. Otherwise, as for an Overwatch state from an old save or a set-up machine gun
--- after its turn start, the pool is the attack count multiplied by `cost`.
-function IOS.Pool(overwatch, cost, turn)
-	local pool = overwatch.ios_pool
-	if pool and overwatch.ios_count == overwatch.num_attacks and overwatch.ios_turn == turn then
-		return pool
-	end
-	return (overwatch.num_attacks or 0) * cost
+--- Returns the Overwatch args of `unit` that the game saves, or nil.
+-- After a load, the game builds g_Overwatch[unit] again from these args, and only these keep the
+-- IOS pool fields (UnitOverwatch.lua:112-235).
+function IOS.SavedArgs(unit)
+	local params = unit.combat_behavior == "OverwatchAction" and unit.combat_behavior_params
+	local args = params and params[3]
+	return type(args) == "table" and args or nil
 end
 
---- Stores `pool` in the Overwatch state and sets the attack count to the number of attacks of
--- `cost` that the pool pays for. Returns that count.
-function IOS.StorePool(overwatch, pool, cost, turn)
+local function StoredPool(t, count, turn)
+	if t and t.ios_pool and t.ios_count == count and t.ios_turn == turn then
+		return t.ios_pool
+	end
+end
+
+--- Returns the raw AP pool of an Overwatch state.
+-- The stored pool, from the state or else from the saved args `saved`, is used only when the game
+-- has not changed the attack count or the turn since IOS stored it. Otherwise, as for an Overwatch
+-- state from an old save or a set-up machine gun after its turn start, the pool is the attack
+-- count multiplied by `cost`.
+function IOS.Pool(overwatch, cost, turn, saved)
+	local count = overwatch.num_attacks
+	return StoredPool(overwatch, count, turn) or StoredPool(saved, count, turn) or (count or 0) * cost
+end
+
+--- Stores `pool` in the Overwatch state and in the saved args `saved`, and sets the attack count
+-- of both to the number of attacks of `cost` that the pool pays for. Returns that count.
+function IOS.StorePool(overwatch, pool, cost, turn, saved)
 	local count = IISRules.idiv(pool, cost)
-	overwatch.ios_pool, overwatch.ios_count, overwatch.ios_turn = pool, count, turn
-	overwatch.num_attacks = count
+	for _, t in ipairs{ overwatch, saved or false } do
+		if t then
+			t.ios_pool, t.ios_count, t.ios_turn = pool, count, turn
+			t.num_attacks = count
+		end
+	end
 	return count
 end
 
@@ -134,11 +151,7 @@ local function FinishOverwatcher(m, left, n, ended_by)
 		m:InterruptPreparedAttack()
 		return
 	end
-	local count = IOS.StorePool(overwatch, left, cost, E.CombatTurn())
-	local params = m.combat_behavior == "OverwatchAction" and m.combat_behavior_params
-	if params and type(params[3]) == "table" then
-		params[3].num_attacks = count
-	end
+	local count = IOS.StorePool(overwatch, left, cost, E.CombatTurn(), IOS.SavedArgs(m))
 	Log("INT #%d overwatcher %s: pool %s, attack cost %s, attacks %d", n, Name(m), FormatAP(left), FormatAP(cost), count)
 	if count < 1 and not overwatch.permanent then
 		Log("INT #%d overwatcher %s: the pool cannot pay for one attack, Overwatch ends", n, Name(m))
@@ -162,7 +175,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 		local overwatch = E.CanControlTeam(m) and E.Overwatch(m)
 		if overwatch then
 			local cost = E.AttackCostRaw(m)
-			local pool = cost > 0 and IOS.Pool(overwatch, cost, turn) or 0
+			local pool = cost > 0 and IOS.Pool(overwatch, cost, turn, IOS.SavedArgs(m)) or 0
 			if cost > 0 and pool >= cost then
 				overwatchers[#overwatchers + 1] = m
 				grants[m] = pool

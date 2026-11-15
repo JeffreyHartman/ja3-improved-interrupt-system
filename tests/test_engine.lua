@@ -368,6 +368,52 @@ t.case("The OnMsg fake runs every handler for a message in the order of definiti
 	t.eq(calls[2], "second a")
 end)
 
+-- A watcher with a counter and seen marks for a mover, as a save holds them.
+local function SavedMemory()
+	ResetWorld()
+	local a, mover = FakeUnit({ id = "a" }), FakeUnit({ id = "enemy", team = enemy_team })
+	Mem.Register(a, mover, 20)
+	Mem.Sees(a, mover)
+	return a, mover
+end
+
+t.case("CombatStart from a load keeps the counters and seen marks of the save", function()
+	local a, mover = SavedMemory()
+	OnMsg.CombatStart({ units = {} }, {})
+	t.eq(Mem.Counter(a, mover), 20)
+	t.eq(Mem.SeenThisTurn(a, mover), true)
+	t.eq(Mem.SeenBefore(a, mover), true)
+end)
+
+t.case("CombatStart of a new combat clears the counters and seen marks", function()
+	local a, mover = SavedMemory()
+	OnMsg.CombatStart(nil, {})
+	t.eq(Mem.Counter(a, mover), 0)
+	t.eq(Mem.SeenThisTurn(a, mover), false)
+	t.eq(Mem.SeenBefore(a, mover), false)
+end)
+
+-- A move plan of 3 steps along x in which watcher `a` registers 6 AP for each step.
+local function PlannedMove(a, mover)
+	local steps = { { x = 0, y = 0 }, { x = 1, y = 0 }, { x = 2, y = 0 } }
+	Mem.PlanMove(mover, { steps = steps, first = 1, rows = { { unit = a, cum = { 6, 12, 18 } } } })
+	return steps
+end
+
+t.case("A load drops the move plans", function()
+	local a, mover = SavedMemory()
+	local steps = PlannedMove(a, mover)
+	Q.attack_targets[mover] = { a }
+	OnMsg.PreLoadSessionData({})
+	t.eq(next(Q.attack_targets), nil)
+	t.eq(Mem.MoveDone(mover, steps[3]), nil)
+	t.eq(Mem.Counter(a, mover), 20)
+end)
+
+t.case("The mod has no LoadGame handler, because JA3 does not send it", function()
+	t.eq(msg_handlers.LoadGame, nil)
+end)
+
 ------------------------------------------------------------------------------------------------
 -- Mod options
 
@@ -1290,6 +1336,42 @@ t.case("CanSaveGameQuery blocks saves during an interrupt", function()
 	t.eq(query.iis_interrupt, true)
 end)
 
+-- Sends DoneMap as the engine does when `loading` says that a save is being loaded.
+local function LoadMap(loading)
+	local orig = E.LoadingSave
+	E.LoadingSave = function() return loading end
+	OnMsg.DoneMap()
+	E.LoadingSave = orig
+end
+
+t.case("A load during an interrupt ends the interrupt and closes its UI", function()
+	ResetWorld()
+	log_lines = {}
+	local ui_ended
+	Q.UI = { End = function(it) ui_ended = it end }
+	local it = ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
+	LoadMap(true)
+	t.eq(IISControl.Active(), false)
+	t.eq(ui_ended, it)
+	t.eq(LogHas("INT #1 END %(load%)"), true)
+end)
+
+t.case("A map change without a load during an interrupt ends it as a map change", function()
+	ResetWorld()
+	log_lines = {}
+	ActiveState({ FakeUnit({ id = "a" }) }, FakeUnit({ id = "enemy", team = enemy_team }))
+	LoadMap(false)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("INT #1 END %(map_change%)"), true)
+end)
+
+t.case("A map change with no interrupt active logs no interrupt end", function()
+	ResetWorld()
+	log_lines = {}
+	OnMsg.DoneMap()
+	t.eq(LogHas("END"), false)
+end)
+
 ------------------------------------------------------------------------------------------------
 -- A full interrupt through the provoke-list wrapper
 
@@ -1513,6 +1595,28 @@ local function TestInterrupt(mover, a, script)
 	game_time = 0
 	return dummy
 end
+
+t.case("A Stop interrupt that a load ends does not stop the mover", function()
+	local mover, a = WalkingMover(10)
+	local pops = 0
+	function mover:PopDestructor() pops = pops + 1 end
+	-- The map change runs in the thread of the load, not in the mover's command thread.
+	FakeControl({ { at = 200, run = function()
+		mover.in_cmd = false
+		LoadMap(true)
+	end } })
+	local dummy = { pos = { x = 3, y = 0 }, valid = false }
+	IISControl.Handle("test", function()
+		return { interrupters = { a }, dummy = dummy, stop = true, label = "Test move" }
+	end)
+	Unit.ProvokeOpportunityAttacksFromList(mover, { { "test", a, nil, dummy } })
+	IISControl.Handle("test", nil)
+	t.eq(IISControl.Active(), false)
+	t.eq(LogHas("END %(load%)"), true)
+	t.eq(mover.combat_path[1], "dest")
+	t.eq(IISControl.IsStopped(mover), false)
+	t.eq(pops, 0)
+end)
 
 t.case("After an interrupt, the visibility override, the camera locks and the player control have their old values", function()
 	local mover, a = WalkingMover(10)
@@ -1979,6 +2083,27 @@ t.case("IOS: an Overwatch state without a pool, as from an old save, gets a pool
 		{ at = 300, run = PressEndTurn },
 	})
 	t.eq(during, 20000)
+end)
+
+t.case("IOS: after a load, the pool comes from the saved Overwatch args, also the part below one attack cost", function()
+	local mover, _, dummies = WalkingMover(10)
+	local ow = Overwatcher{ attacks = 3, cost = 3000 }
+	ow.combat_behavior = "OverwatchAction"
+	ow.combat_behavior_params = { "Attack", 0, { num_attacks = 3 } }
+	g_Combat.current_turn = 1
+	SetIOS(true)
+	OverwatchTrigger(mover, ow, dummies, { { at = 100, run = Shoot(ow, mover, 4000) }, { at = 300, run = PressEndTurn } })
+	-- A load builds the Overwatch state again from the saved args, without the IOS fields.
+	local args = ow.combat_behavior_params[3]
+	g_Overwatch[ow] = { num_attacks = args.num_attacks, triggered_by = {} }
+	local during
+	OverwatchTrigger(mover, ow, dummies, {
+		{ at = 100, run = function() during = ow.ActionPoints end },
+		{ at = 300, run = PressEndTurn },
+	})
+	g_Combat.current_turn = nil
+	t.eq(args.num_attacks, 1)
+	t.eq(during, 5000)
 end)
 
 t.case("IOS: after the game counts the attacks of a set-up machine gun again at its turn start, the pool comes from the new count", function()

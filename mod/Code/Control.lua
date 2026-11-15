@@ -189,9 +189,10 @@ end
 -- The begin runs the list from the top, and the end from the bottom.
 local takeover = {
 	{
-		-- PopDestructor must run in the mover's command thread, and every caller of EndInterrupt
-		-- runs there. The engine pops a destructor before it calls it, so the give-back pops only
-		-- when the destructor did not run.
+		-- PopDestructor must run in the mover's command thread. OnMsg.DoneMap ends the interrupt from
+		-- the thread of the map change, and then the destructor stays until the map deletes the
+		-- mover. The engine pops a destructor before it calls it, so the give-back pops only when
+		-- the destructor did not run.
 		take = function(it, state)
 			local mover = it:Mover()
 			if not E.InCommandThread(mover) then return end
@@ -204,8 +205,10 @@ local takeover = {
 		give_label = "pop destructor",
 		give = function(it, state)
 			if not state.destructor then return end
+			local mover = it:Mover()
+			if not E.InCommandThread(mover) then return end
 			state.destructor = false
-			it:Mover():PopDestructor()
+			mover:PopDestructor()
 		end,
 	},
 	{
@@ -424,7 +427,7 @@ local function Run(mover, req, n)
 			end)
 		end
 	end
-	if req.stop then
+	if req.stop and not state.map_done then
 		SafeCall(it, "StopMover", IISControl.StopMover, it, state.dummy)
 	end
 end
@@ -892,6 +895,16 @@ end
 function OnMsg.CanSaveGameQuery(query)
 	if active then
 		query.iis_interrupt = true
+	end
+end
+
+-- The player can load a save during an interrupt, because CanLoadGame does not send
+-- CanSaveGameQuery. The map change deletes the mover's command thread, so the wait loop in Run
+-- never ends the interrupt.
+function OnMsg.DoneMap()
+	if active then
+		taken.map_done = true
+		IISControl.EndInterrupt(active, E.LoadingSave() and "load" or "map_change")
 	end
 end
 
