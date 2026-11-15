@@ -3063,3 +3063,14 @@ t.case("Free aim: Killzone without GBO 4 gives 1 level, and the option value whe
 	t.eq(VanillaKillzoneAimRange({ IOSFreeAim = "0" }), 1)
 	t.eq(VanillaKillzoneAimRange({ IOSFreeAim = "2" }), 2)
 end)
+
+t.case("Watchers: a merc is on the player side and an enemy is not, and each watches only the other side", function()
+	local alive = function() return false end
+	local merc = { team = { control = "UI" }, IsIncapacitated = alive }
+	local enemy = { team = { control = "AI" }, IsIncapacitated = alive }
+	merc.IsOnEnemySide = function() return true end
+	t.eq(Q.IsPlayerSide(merc), true)
+	t.eq(Q.IsPlayerSide(enemy), false)
+	t.eq(Q.ObserverSkipReason(merc, enemy), nil)
+	t.eq(Q.ObserverSkipReason(merc, merc), "not player controlled")
+end)

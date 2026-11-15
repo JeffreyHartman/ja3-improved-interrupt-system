@@ -431,10 +431,21 @@ end
 -- Statuses that take a merc out of player control.
 local blocking_status = { "Unconscious", "Downed", "Panicked", "Berserk", "Blinded" }
 
+-- The candidate watchers for a mover's checks, collective joiners and IIS registration.
+-- Mercs watch an AI mover.
+function IIS.Watchers(mover)
+	return E.PlayerUnits()
+end
+
+-- True when w is a merc, which sets the side flag of w in the JA2 Classic duel.
+function IIS.IsPlayerSide(w)
+	return E.CanControlTeam(w) and true or false
+end
+
 -- A watcher whose AP the mover's actions can register (IIS) or who can duel (JA2 Classic).
 function IIS.ObserverSkipReason(w, mover)
 	if not IsValid(w) or w:IsIncapacitated() then return "incapacitated" end
-	if not E.CanControlTeam(w) then return "not player controlled" end
+	if IIS.IsPlayerSide(w) == IIS.IsPlayerSide(mover) then return "not player controlled" end
 	if not w:IsOnEnemySide(mover) then return "not enemies" end
 end
 
@@ -500,7 +511,7 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 	local running = IsRunning(mover, dummies, first)
 	local rows = {}
 	local start_target = { pos = mover:GetPos(), stance = mover.stance }
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(mover)) do
 		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, "JA2 Classic")
 		if not skip and (E.SeesNow(w, mover) or Mem.SeenThisTurn(w, mover)) then
 			skip = "saw mover this turn"
@@ -527,7 +538,7 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 				local _, m_dark = E.Sight(mover, w)
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = true, saw_before = Mem.SeenBefore(w, mover) }),
+					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover) }),
 					{ passive = true, distance = d, max_visible = max_visible, dark = w_dark, other_saw_me = Mem.SeenBefore(mover, w) })
 				local mp = R.ClassicPoints(
 					IIS.ClassicSoldier(mover, { stance = dummy.stance or mover.stance, running = running,
@@ -555,7 +566,7 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 	local rc = IIS.RulesConfig()
 	local first = FirstStep(mover, dummies)
 	local rows = {}
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(mover)) do
 		local skip = IIS.ObserverSkipReason(w, mover)
 		if skip then
 			Count(stats.watcher_skips, skip)
@@ -605,7 +616,7 @@ function IIS.FindAttackTrigger(mover, n)
 	local stats = IIS.turn_stats
 	local targets = IIS.attack_targets[mover] or {}
 	local rows = {}
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(mover)) do
 		local skip = IIS.ObserverSkipReason(w, mover) or IIS.WinSkipReason(w, system)
 		local targeted = targets[w] or false
 		if skip then
@@ -621,7 +632,7 @@ function IIS.FindAttackTrigger(mover, n)
 				local d = E.DistTiles(w, mover:GetPos())
 				local max_visible = E.MaxSightTiles()
 				local wp = R.ClassicPoints(
-					IIS.ClassicSoldier(w, { is_player = true, saw_before = Mem.SeenBefore(w, mover) }),
+					IIS.ClassicSoldier(w, { is_player = IIS.IsPlayerSide(w), saw_before = Mem.SeenBefore(w, mover) }),
 					{ passive = true, distance = d, max_visible = max_visible, other_saw_me = true })
 				local mp = R.ClassicPoints(
 					IIS.ClassicSoldier(mover, { saw_before = true, team_knows = true }),
@@ -758,7 +769,7 @@ local function AddCollective(st_mercs, mover, n)
 	end
 	local joined = {}
 	for _, leader in ipairs(originals) do
-		for _, mate in ipairs(E.PlayerUnits()) do
+		for _, mate in ipairs(IIS.Watchers(mover)) do
 			local skip = table.find(st_mercs, mate) and "interrupter"
 				or IIS.ObserverSkipReason(mate, mover) or IIS.WinSkipReason(mate, "IIS")
 			if not skip then
@@ -877,7 +888,7 @@ IIS.attack_targets = IIS.attack_targets or {}
 function IIS.RegisterAction(unit, action_id, ap)
 	local ap113 = R.To113AP(ap)
 	local parts = {}
-	for _, w in ipairs(E.PlayerUnits()) do
+	for _, w in ipairs(IIS.Watchers(unit)) do
 		if not IIS.ObserverSkipReason(w, unit) and E.SeesNow(w, unit) then
 			local pct = IIS.RegisteredPercent(w, unit, unit:GetPos())
 			local add = R.IISRegisteredAP(ap113, pct)
