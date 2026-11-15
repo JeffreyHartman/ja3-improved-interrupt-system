@@ -143,6 +143,8 @@ For a quick combat test, open the Mod Editor from the main menu. Its Cheats menu
 
 All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LUA ERROR]` lines with their stack, and mod load errors.
 
+The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP by `const.Scale.AP`). GBO 4 changes that scale and keeps raw AP, so with GBO 4 the log AP values are 10 times the vanilla values. For example, `110->1.8` is 11 vanilla AP at the start and 0.18 at the end, and `165/121` is 16.5 of a maximum of 12.1. Divide by 10 before you compare a GBO 4 log with a vanilla log or with an attack cost in vanilla AP.
+
 | Line | Meaning |
 |---|---|
 | `loaded`, `control loaded`, `IOS loaded`, `UI loaded` | The game ran the code files. Each hook status must say `ours`. `IOS loaded` gives the IOS option. |
