@@ -18,8 +18,8 @@ function IISControl.Active()
 	return active
 end
 
--- The active interrupt when it is a Player interrupt, or false. The overrides that hand the
--- engine to merc interrupters apply only to it.
+-- The active interrupt when it is a Player interrupt, or false. Only during it do the overrides let
+-- the merc interrupters take orders and start actions in the enemy turn.
 local function PlayerInterrupt()
 	return active and not active:IsEnemy() and active or false
 end
@@ -370,13 +370,13 @@ function IISControl.Handle(entry_type, handler)
 	handlers[entry_type] = handler
 end
 
-local function Run(mover, req, n)
-	local cfg = IIS.Config
-	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = cfg }
-
-	local in_cmd = E.InCommandThread(mover)
-	Log("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s in_command_thread=%s", n, req.label, Name(mover), Pos(mover),
-		AP(mover), req.where or "", tostring(in_cmd))
+-- Writes the BEGIN log line, with `begin_note` at its end, and a line for each interrupter. Removes
+-- the Free Move AP of each interrupter and gives it the AP grant of the request. Returns the raw AP
+-- that each granted interrupter had before its grant.
+local function BeginInterrupters(it, req, begin_note)
+	local n, mover = it:Number(), it:Mover()
+	Log("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s%s", n, req.label, Name(mover), Pos(mover), AP(mover),
+		req.where or "", begin_note or "")
 	local notes = req.notes or empty_table
 	local grants = req.ap_grants or empty_table
 	local ap_before = {}
@@ -394,6 +394,13 @@ local function Run(mover, req, n)
 		end
 		Log("INT #%d   interrupter %d: %s ap=%s%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark, grant_mark)
 	end
+	return ap_before
+end
+
+local function Run(mover, req, n)
+	local cfg = IIS.Config
+	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = cfg }
+	local ap_before = BeginInterrupters(it, req, " in_command_thread=" .. tostring(E.InCommandThread(mover)))
 	SafeCall(nil, "before log", function()
 		Log("INT #%d before: %s | ai_controller=%s awareness_pending=%s | %s", n, UIState(it),
 			tostring(not not g_AIExecutionController), tostring(g_UnitAwarenessPending), RunningStateSnapshot())
@@ -488,17 +495,7 @@ end
 -- of the interrupters in a new thread.
 local function RunEnemy(mover, req, n)
 	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = IIS.Config, enemy = true }
-	Log("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s", n, req.label, Name(mover), Pos(mover), AP(mover), req.where or "")
-	local notes = req.notes or empty_table
-	for i, m in ipairs(it:Interrupters()) do
-		local free = 0
-		SafeCall(nil, "RemoveFreeMove", function()
-			free = IISControl.RemoveFreeMove(m)
-		end)
-		local free_mark = free > 0 and string.format(" (free move %s removed)", IIS.FormatAP(free)) or ""
-		Log("INT #%d   interrupter %d: %s ap=%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark)
-	end
-	IISControl.Activate(it, req.dummy, req)
+	IISControl.Activate(it, req.dummy, req, BeginInterrupters(it, req))
 	SafeCall(it, "UI.BeginEnemy", function()
 		IIS.UI.BeginEnemy(it)
 	end)
@@ -825,10 +822,10 @@ end
 local orig_CanBeControlled = Unit.CanBeControlled
 function Unit:CanBeControlled(...)
 	local it = active
-	if it and it:IsEnemy() and self.team and self.team.control == "UI" then
+	if it and it:IsEnemy() and E.CanControlTeam(self) then
 		return false, "iis_enemy_interrupt"
 	end
-	if it and self.team and self.team.control == "UI" then
+	if it and E.CanControlTeam(self) then
 		if it:CanAct(self) then
 			Forced("CanBeControlled")
 			return true
@@ -883,7 +880,7 @@ end
 
 function StartCombatAction(action_id, unit, ap, ...)
 	local it = active
-	if it and it:IsEnemy() and unit and unit.team and unit.team.control == "UI" then
+	if it and it:IsEnemy() and unit and E.CanControlTeam(unit) then
 		Log("INT #%d %s of %s refused: enemy interrupt", it:Number(), tostring(action_id), Name(unit))
 		CancelAction(it, action_id, unit)
 		return
@@ -1050,7 +1047,7 @@ function OnMsg.SelectionChange()
 	local it = PlayerInterrupt()
 	if not it then return end
 	local sel = SelectedObj
-	if IsKindOf(sel, "Unit") and sel.team and sel.team.control == "UI" and not it:IsInterrupter(sel) then
+	if IsKindOf(sel, "Unit") and E.CanControlTeam(sel) and not it:IsInterrupter(sel) then
 		CreateRealTimeThread(function()
 			if active ~= it then return end
 			local m = it:Living()[1]
