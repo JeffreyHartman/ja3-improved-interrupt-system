@@ -368,6 +368,50 @@ t.case("The OnMsg fake runs every handler for a message in the order of definiti
 	t.eq(calls[2], "second a")
 end)
 
+-- A watcher with a counter and seen marks for a mover, as a save holds them.
+local function SavedMemory()
+	ResetWorld()
+	local a, mover = FakeUnit({ id = "a" }), FakeUnit({ id = "enemy", team = enemy_team })
+	Mem.Register(a, mover, 20)
+	Mem.Sees(a, mover)
+	return a, mover
+end
+
+t.case("CombatStart from a load keeps the counters and seen marks of the save", function()
+	local a, mover = SavedMemory()
+	OnMsg.CombatStart({ units = {} }, {})
+	t.eq(Mem.Counter(a, mover), 20)
+	t.eq(Mem.SeenThisTurn(a, mover), true)
+	t.eq(Mem.SeenBefore(a, mover), true)
+end)
+
+t.case("CombatStart of a new combat clears the counters and seen marks", function()
+	local a, mover = SavedMemory()
+	OnMsg.CombatStart(nil, {})
+	t.eq(Mem.Counter(a, mover), 0)
+	t.eq(Mem.SeenThisTurn(a, mover), false)
+	t.eq(Mem.SeenBefore(a, mover), false)
+end)
+
+-- A move plan of 3 steps along x in which watcher `a` registers 6 AP for each step.
+local function PlannedMove(a, mover)
+	local steps = { { x = 0, y = 0 }, { x = 1, y = 0 }, { x = 2, y = 0 } }
+	Mem.PlanMove(mover, { steps = steps, first = 1, rows = { { unit = a, cum = { 6, 12, 18 } } } })
+	return steps
+end
+
+t.case("A load drops the move plans", function()
+	local a, mover = SavedMemory()
+	local steps = PlannedMove(a, mover)
+	OnMsg.PreLoadSessionData({})
+	t.eq(Mem.MoveDone(mover, steps[3]), nil)
+	t.eq(Mem.Counter(a, mover), 20)
+end)
+
+t.case("No handler for LoadGame remains, because JA3 does not send it", function()
+	t.eq(msg_handlers.LoadGame, nil)
+end)
+
 ------------------------------------------------------------------------------------------------
 -- Mod options
 

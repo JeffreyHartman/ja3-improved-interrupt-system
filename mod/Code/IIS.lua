@@ -996,8 +996,15 @@ local function ResetCombatState(why)
 	Log("combat state reset (%s)", why)
 end
 
-function OnMsg.CombatStart()
-	ResetCombatState("CombatStart")
+-- On a load, dynamic_data is the saved combat (Combat.lua:313), and gv_IIS already holds the saved
+-- counters and seen marks.
+function OnMsg.CombatStart(dynamic_data)
+	if dynamic_data then
+		IIS.attack_targets = {}
+		Log("combat state kept (CombatStart from a load)")
+	else
+		ResetCombatState("CombatStart")
+	end
 	Log("CombatStart system=%s %s", IIS.Config.system, IIS.HookStatus())
 end
 
@@ -1006,9 +1013,11 @@ function OnMsg.CombatEnd()
 	ResetCombatState("CombatEnd")
 end
 
-function OnMsg.LoadGame()
+-- JA3 sends PreLoadSessionData on each load, after the GameVars get their saved values and before
+-- the map loads (GameSession.lua:602). It does not send LoadGame.
+function OnMsg.PreLoadSessionData()
 	Mem.Loaded()
-	Log("LoadGame in_combat=%s system=%s %s", tostring(not not g_Combat), IIS.Config.system, IIS.HookStatus())
+	Log("load: move plans dropped, system=%s %s", IIS.Config.system, IIS.HookStatus())
 end
 
 function OnMsg.TurnStart(team_idx)
