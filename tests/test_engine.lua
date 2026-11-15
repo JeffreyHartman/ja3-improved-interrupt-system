@@ -3247,3 +3247,52 @@ t.case("Enemy interrupt: no check of either side runs while it is active", funct
 	t.eq(lists.merc, nil)
 	t.eq(Q.turn_stats.mover_skips["interrupt active"], 2)
 end)
+
+t.case("Enemy interrupt: with collective on, an enemy teammate near the winner joins and the AI run gets both", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local mate = FakeUnit({ id = "mate", team = enemy_team, ap = 10000, pos = { x = 0, y = 7 } })
+	world.ai_units = { e, mate }
+	world.rand = 0
+	FakeControl()
+	local n = IISControl.InterruptCount() + 1
+	MercMoves(merc, dummies)
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(#world.ai_runs[1].units, 2)
+	t.eq(world.ai_runs[1].units[1], e)
+	t.eq(world.ai_runs[1].units[2], mate)
+	t.eq(LogHas("INT #" .. n .. " collective: e#e %-> mate#mate chance=%d+ roll=0 JOINS"), true)
+	t.eq(LogHas("INT #" .. n .. "   interrupter 2: mate#mate ap=10 %(collective%)"), true)
+end)
+
+t.case("Enemy interrupt: with collective off, only the winner plays", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local mate = FakeUnit({ id = "mate", team = enemy_team, ap = 10000, pos = { x = 0, y = 7 } })
+	world.ai_units = { e, mate }
+	world.rand = 0
+	Q.Config.collective = false
+	FakeControl()
+	MercMoves(merc, dummies)
+	RunThreads()
+	Q.Config.collective = true
+	t.eq(#world.ai_runs, 1)
+	t.eq(#world.ai_runs[1].units, 1)
+	t.eq(world.ai_runs[1].units[1], e)
+end)
+
+t.case("Enemy interrupt: a joiner must pass the merc joiner checks and be on the winner's team", function()
+	local merc, e, dummies = WalkingMerc(10)
+	local far = FakeUnit({ id = "far", team = enemy_team, ap = 10000, pos = { x = 0, y = 30 } })
+	local tired = FakeUnit({ id = "tired", team = enemy_team, ap = 0, pos = { x = 0, y = 7 } })
+	local other = FakeUnit({ id = "other", team = { side = "enemy2", control = "AI" }, ap = 10000, pos = { x = 0, y = 7 } })
+	world.ai_units = { e, far, tired, other }
+	world.rand = 0
+	FakeControl()
+	MercMoves(merc, dummies)
+	RunThreads()
+	t.eq(#world.ai_runs, 1)
+	t.eq(#world.ai_runs[1].units, 1)
+	t.eq(LogHas("collective: e#e %-> far#far skipped: %d+ tiles away"), true)
+	t.eq(LogHas("collective: e#e %-> tired#tired skipped: AP below minimum"), true)
+	t.eq(LogHas("collective: e#e %-> other#other skipped: other team"), true)
+end)

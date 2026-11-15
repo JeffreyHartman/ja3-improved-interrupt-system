@@ -811,8 +811,8 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	return { entry }, idx
 end
 
--- IIS collective interrupts (Soldier Control.cpp:24960): teammates within 5 tiles of an original
--- winner join it by chance.
+-- IIS collective interrupts (Soldier Control.cpp:24960): teammates of an original winner within 5 tiles of it
+-- join by chance. This holds for merc winners and enemy winners.
 local function AddCollective(st_mercs, mover, n)
 	local rc = IIS.RulesConfig()
 	local originals = {}
@@ -824,6 +824,9 @@ local function AddCollective(st_mercs, mover, n)
 		for _, mate in ipairs(IIS.Watchers(mover)) do
 			local skip = table.find(st_mercs, mate) and "interrupter"
 				or IIS.ObserverSkipReason(mate, mover) or IIS.WinSkipReason(mate, "IIS")
+			if not skip and mate.team ~= leader.team then
+				skip = "other team"
+			end
 			if not skip then
 				local dist = E.DistTiles(leader, mate:GetPos())
 				if dist > rc.collective_radius then
@@ -854,7 +857,7 @@ end
 --- The IISControl handler for "iis" and "iis_enemy" entries. Returns the interrupt request for the
 -- winners of the check that can still act and the collective joiners, or nil for an entry from an
 -- older version or when no winner can act. An "iis_enemy" entry gives an Enemy interrupt, which
--- always stops a merc that moves and has no collective joiners.
+-- always stops a merc that moves.
 -- It calls IISMemory.Fired for the interrupters and logs the commit. `n` is the interrupt number
 -- for the collective log lines.
 function IIS.InterruptRequest(mover, entry, n)
@@ -883,7 +886,7 @@ function IIS.InterruptRequest(mover, entry, n)
 		interrupters[i] = m
 	end
 	local joined = {}
-	if info.system == "IIS" and cfg.collective and not info.enemy then
+	if info.system == "IIS" and cfg.collective then
 		IIS.SafeCall(nil, "collective", function()
 			joined = AddCollective(interrupters, mover, n)
 		end)
