@@ -442,25 +442,40 @@ local function Run(mover, req, n)
 	end
 end
 
+local function SendToIdle(it)
+	for _, m in ipairs(it:Living()) do
+		if not m:IsIdleCommand() then
+			Log("INT #%d sending %s to Idle (was %s)", it:Number(), Name(m), tostring(m.command))
+			m:SetCommand("Idle")
+		end
+	end
+end
+
 --- Runs the vanilla AI for the interrupters of the Enemy interrupt `it` and ends the interrupt
 -- when the AI returns. Called in its own game-time thread (ADR 0003).
 function IISControl.RunEnemyAI(it)
 	if active ~= it then return end
-	SafeCall(it, "AI run", function()
+	local ok = SafeCall(it, "AI run", function()
 		Log("INT #%d AI runs for %s", it:Number(), NameList(it:Living()))
 		E.RunAI(it:Living(), it:Mover())
 	end)
-	IISControl.EndInterrupt(it, "ai_done")
+	if not ok then
+		SafeCall(it, "StopAI", E.StopAI, nil, it:Mover())
+	end
+	IISControl.EndInterrupt(it, ok and "ai_done" or "ai_error")
 end
 
 --- Ends the Enemy interrupt `it` with a stuck dump when its AI run in the thread `ai_thread` has not
 -- returned after `enemy_ai_timeout_ms` of game time. Called in its own game-time thread.
+-- The stuck check (IIS.Tick) cannot do this: it runs in the wait loop of a Player interrupt in the
+-- mover's command thread, and an Enemy interrupt ends that command (ADR 0003).
 function IISControl.WatchEnemyAI(it, ai_thread)
 	local elapsed = 0
 	while active == it do
 		if elapsed >= IIS.Config.enemy_ai_timeout_ms then
 			SafeCall(it, "DumpStuck", IIS.DumpStuck, it, string.format("the AI run did not return in %dms", elapsed))
-			SafeCall(it, "StopAI", E.StopAI, ai_thread)
+			SafeCall(it, "StopAI", E.StopAI, ai_thread, it:Mover())
+			SafeCall(it, "stop interrupter commands", SendToIdle, it)
 			IISControl.EndInterrupt(it, "ai_timeout")
 			return
 		end
@@ -614,6 +629,22 @@ function IIS.Tick(it, elapsed)
 	end
 end
 
+-- An Overwatch expires in the next combat turn (UnitOverwatch.lua:210), and the AI turns come later
+-- in the same combat turn as the player turn. Unit:BeginTurn gives 0 AP to a unit whose Overwatch
+-- has not expired (Unit.lua:2692), so the Overwatch of an interrupter ends at its next turn start.
+local function ExpireOverwatchAtTurnStart(it)
+	local all = rawget(_G, "g_Overwatch")
+	local turn = g_Combat and g_Combat.current_turn
+	if not all or not turn then return end
+	for _, m in ipairs(it:Interrupters()) do
+		local ow = all[m]
+		if ow and not ow.permanent and (ow.expiration_turn or 0) > turn then
+			ow.expiration_turn = turn
+			Log("INT #%d %s: Overwatch ends at its next turn start", it:Number(), Name(m))
+		end
+	end
+end
+
 function IISControl.EndInterrupt(it, reason)
 	if active ~= it then return end
 	active = false
@@ -642,6 +673,7 @@ function IISControl.EndInterrupt(it, reason)
 		SafeCall(it, "UI.EndEnemy", function()
 			IIS.UI.EndEnemy(it)
 		end)
+		SafeCall(it, "Overwatch expiration", ExpireOverwatchAtTurnStart, it)
 		SafeCall(it, "reselect merc", function()
 			local mover = it:Mover()
 			if IsValid(mover) and not mover:IsDead() and not mover:IsIncapacitated() and SelectedObj ~= mover then
@@ -982,12 +1014,7 @@ function NetSyncEvents.EndTurn(player_id, ...)
 			end
 		elseif press == "forced" then
 			SafeCall(it, "DumpStuck", IIS.DumpStuck, it, "End Turn pressed again while a merc is busy")
-			for _, m in ipairs(it:Living()) do
-				if not m:IsIdleCommand() then
-					Log("INT #%d sending merc %s to Idle (was %s)", it:Number(), Name(m), tostring(m.command))
-					m:SetCommand("Idle")
-				end
-			end
+			SendToIdle(it)
 		end
 		return
 	end

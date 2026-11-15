@@ -321,6 +321,7 @@ E.CanControlTeam = function(u) return u.team.control == "UI" end
 E.AIUnits = function() return world.ai_units end
 E.IsAITurnEnemy = function(u) return u.team.control ~= "UI" and not world.player_turn end
 E.IsPlayerTurnMerc = function(u) return u.team.control == "UI" and world.player_turn end
+local real_RunAI, real_StopAI = E.RunAI, E.StopAI
 -- Records each AI run and plays world.ai_script(units) in place of the vanilla AI.
 E.RunAI = function(units, camera_obj)
 	world.ai_runs[#world.ai_runs + 1] = { units = units, camera_obj = camera_obj, active = IISControl.Active() }
@@ -3352,6 +3353,103 @@ t.case("Enemy interrupt: a hung AI run ends at the time-out with a stuck dump, a
 	game_time = 0
 end)
 
+t.case("Enemy interrupt: an AI run that fails calls E.StopAI and ends the interrupt with the reason ai_error", function()
+	local merc, _, dummies = WalkingMerc(10)
+	FakeControl()
+	local stopped = 0
+	local orig_stop = E.StopAI
+	E.StopAI = function() stopped = stopped + 1 end
+	world.ai_script = function() error("AI broke") end
+	MercMoves(merc, dummies)
+	local ok = pcall(RunThreads)
+	E.StopAI = orig_stop
+	t.eq(ok, true)
+	t.eq(stopped, 1)
+	t.eq(LogHas("INT #%d+ AI run failed: .*AI broke"), true)
+	t.eq(LogHas("INT #%d+ END %(ai_error%)"), true)
+	t.eq(IISControl.Active(), false)
+	t.eq(Unit.CanBeControlled(merc), "vanilla")
+end)
+
+-- A fake AI controller class for the real E.RunAI and E.StopAI. `execute(controller)` plays
+-- AIExecutionController:Execute, and DoneObject plays AIExecutionController:Done (CombatCamera.lua:601).
+local function FakeAIController(execute)
+	local saved = { CreateAIExecutionController, DoneObject, AdjustCombatCamera, g_AIExecutionController }
+	local fake = { done = {}, camera = {} }
+	function CreateAIExecutionController(o)
+		local c = { label = o.label, restore_camera_obj = false }
+		function c:Execute(units) return execute(self, units) end
+		g_AIExecutionController = c
+		fake.controller = c
+		return c
+	end
+	function DoneObject(c)
+		fake.done[#fake.done + 1] = c
+		if c.restore_camera_obj then
+			fake.camera[#fake.camera + 1] = c.restore_camera_obj
+		end
+		g_AIExecutionController = false
+	end
+	function AdjustCombatCamera(state, _, target)
+		if state == "reset" then
+			fake.camera[#fake.camera + 1] = target
+		end
+	end
+	function fake.restore()
+		CreateAIExecutionController, DoneObject, AdjustCombatCamera, g_AIExecutionController = table.unpack(saved, 1, 4)
+	end
+	return fake
+end
+
+t.case("Enemy interrupt: when Execute fails, E.RunAI removes the AI controller, turns the camera to the merc and gives back player control", function()
+	local merc = FakeUnit({ id = "merc" })
+	g_Combat.is_player_control = true
+	local fake = FakeAIController(function()
+		g_Combat.is_player_control = false
+		error("Execute broke")
+	end)
+	local ok, err = pcall(real_RunAI, {}, merc)
+	fake.restore()
+	t.eq(ok, false)
+	t.eq(tostring(err):find("Execute broke") ~= nil, true)
+	t.eq(#fake.done, 1)
+	t.eq(fake.done[1], fake.controller)
+	t.eq(fake.camera[1], merc)
+	t.eq(g_Combat.is_player_control, true)
+end)
+
+t.case("Enemy interrupt: E.StopAI turns the camera to the merc, with or without an AI controller", function()
+	local merc = FakeUnit({ id = "merc" })
+	local fake = FakeAIController(function() end)
+	CreateAIExecutionController{ label = "hung" }
+	real_StopAI(nil, merc)
+	t.eq(#fake.done, 1)
+	t.eq(fake.camera[1], merc)
+	real_StopAI(nil, merc)
+	fake.restore()
+	t.eq(#fake.done, 1)
+	t.eq(fake.camera[2], merc)
+end)
+
+t.case("Enemy interrupt: at the time-out the AI interrupters stop their commands and E.StopAI gets the merc for the camera", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	local stop_args
+	local orig_stop = E.StopAI
+	E.StopAI = function(thread, camera_obj) stop_args = { camera_obj = camera_obj } end
+	world.ai_script = function()
+		e.command = "CombatGoto"
+		coroutine.yield()
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	E.StopAI = orig_stop
+	game_time = 0
+	t.eq(stop_args.camera_obj, merc)
+	t.eq(e.command, "Idle")
+	t.eq(LogHas("INT #%d+ sending e#e to Idle %(was CombatGoto%)"), true)
+end)
+
 t.case("Enemy interrupt: CanSaveGameQuery blocks saves until the AI run returns", function()
 	local merc, _, dummies = WalkingMerc(10)
 	FakeControl()
@@ -3476,6 +3574,62 @@ t.case("Enemy interrupt: an AI interrupter's action adds to the counters of the 
 	t.eq(Mem.Counter(merc, e) > 0, true)
 	t.eq(world.during ~= false, true)
 	t.eq(IISControl.InterruptCount(), n + 1)
+end)
+
+t.case("Enemy interrupt: an AI interrupter's move adds the AP of each seen step to the counters of the mercs, and starts no check", function()
+	local merc, e, dummies = WalkingMerc(10)
+	world.players = { merc }
+	FakeControl()
+	local n = IISControl.InterruptCount()
+	MercMoves(merc, dummies)
+	local result = {}
+	world.ai_script = function()
+		g_AIExecutionController = {}
+		local path = Path(e, 6)
+		world.los[merc] = Steps(2, 3, 4, 5, 6)
+		e.in_cmd = true
+		result.list = Unit.CheckProvokeOpportunityAttacks(e, nil, "move", path)
+		e.pos = path[6].pos
+		OnMsg.UnitMovementDone(e)
+		e.in_cmd = false
+		g_AIExecutionController = false
+	end
+	RunThreads()
+	t.eq(result.list, nil)
+	-- 6 registered AP on each of the 5 seen steps, as for the enemy watcher of WalkingMerc.
+	t.eq(Mem.Counter(merc, e), 30)
+	t.eq(IISControl.InterruptCount(), n + 1)
+	t.eq(LogHas("TRIGGER mover=e#e"), false)
+end)
+
+-- Plays the AP rule of vanilla Unit:BeginTurn (Unit.lua:2671, 2692): an Overwatch that has not
+-- expired stays, and then the unit starts its turn with 0 AP.
+local function VanillaBeginTurn(u)
+	local ow = g_Overwatch[u]
+	if ow and not (ow.permanent or ow.expiration_turn > g_Combat.current_turn) then
+		g_Overwatch[u] = nil
+		ow = nil
+	end
+	u.ActionPoints = ow and not ow.permanent and 0 or u.max_ap
+end
+
+t.case("Enemy interrupt: an interrupter that spends all its AP and goes on Overwatch in it starts its next turn with full AP", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	MercMoves(merc, dummies)
+	-- Vanilla Overwatch expires in the round after the one it starts in (UnitOverwatch.lua:210),
+	-- and the enemy turn comes later in the same round as the player turn.
+	local saved_turn = g_Combat.current_turn
+	g_Combat.current_turn = 3
+	world.ai_script = function()
+		e:ConsumeAP(e.ActionPoints)
+		g_Overwatch[e] = { expiration_turn = g_Combat.current_turn + 1, triggered_by = {} }
+	end
+	RunThreads()
+	VanillaBeginTurn(e)
+	g_Combat.current_turn = saved_turn
+	t.eq(e.ActionPoints, e.max_ap)
+	t.eq(g_Overwatch[e], nil)
 end)
 
 t.case("Enemy interrupt: with collective on, an enemy teammate near the winner joins and the AI run gets both", function()

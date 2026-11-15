@@ -52,6 +52,8 @@ In JA2 Classic, an enemy gets its point for a team that saw the merc (`E.TeamSee
 
 An enemy that is on Overwatch and triggers on the same step as an enemy interrupt fires first, and the log says "same step as vanilla X, vanilla runs first". A merc that the Overwatch downs gets no interrupt.
 
+When `AIExecutionController:Execute` fails, `E.RunAI` calls `E.StopAI`, and the interrupt ends with the reason `ai_error`. `E.StopAI` removes the AI controller, turns the camera back to the merc and gives control back to the player. At the time-out, the mod also sends each interrupter that still runs a command to `Idle` ("sending X to Idle"). In IIS, the move of an interrupter registers the AP of each step with the mercs that see it, but its check starts no interrupt. Vanilla gives 0 AP at the turn start to a unit whose Overwatch has not expired, and an Overwatch from the player turn expires one combat turn later. Thus at the end of an Enemy interrupt, the Overwatch of each interrupter expires at its next turn start ("Overwatch ends at its next turn start"), and the AP that it spent does not come out of its next turn.
+
 The handler for `"overwatch"` entries is `IOS.InterruptRequest` in `IOS.lua`. `IOS.Install` registers it when the IOS option is on, on `ModsReloaded` and when the options change. When the option is off, no handler is registered, and vanilla gets each `"overwatch"` entry unchanged. The handler:
 
 - takes each entry of a merc (a unit of a UI-controlled team) on Overwatch whose pool can pay for one default attack. An entry of an enemy overwatcher goes to vanilla unchanged;

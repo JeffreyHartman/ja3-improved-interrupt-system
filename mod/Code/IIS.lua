@@ -197,22 +197,31 @@ function E.IsPlayerTurnMerc(unit)
 end
 
 --- Runs the vanilla AI for `units` until it finishes, in the calling game-time thread.
--- When the AI is done, the controller turns the camera back to `camera_obj`.
+-- When the AI is done, the controller turns the camera back to `camera_obj`. When `Execute`
+-- fails, E.StopAI cleans up and the error goes to the caller.
 function E.RunAI(units, camera_obj)
 	local controller = CreateAIExecutionController{ label = "IISEnemyInterrupt" }
 	controller.restore_camera_obj = camera_obj
-	controller:Execute(units)
+	local ok, err = pcall(controller.Execute, controller, units)
+	if not ok then
+		E.StopAI(nil, camera_obj)
+		error(err, 0)
+	end
 	DoneObject(controller)
 end
 
---- Stops an AI run that did not return: deletes its thread `thread`, removes the AI controller and
--- gives control back to the player.
-function E.StopAI(thread)
+--- Stops an AI run that did not return or failed: deletes its thread `thread`, removes the AI
+-- controller, turns the camera back to `camera_obj` and gives control back to the player.
+function E.StopAI(thread, camera_obj)
 	if IsValidThread(thread) and thread ~= CurrentThread() then
 		DeleteThread(thread)
 	end
+	-- AIExecutionController:Done turns the camera to restore_camera_obj (CombatCamera.lua:605).
 	if g_AIExecutionController then
+		g_AIExecutionController.restore_camera_obj = camera_obj or g_AIExecutionController.restore_camera_obj
 		DoneObject(g_AIExecutionController)
+	elseif camera_obj then
+		AdjustCombatCamera("reset", nil, camera_obj, nil, nil, "noFitCheck")
 	end
 	if g_Combat and not g_Combat.is_player_control then
 		g_Combat:SetPlayerControl(true)
@@ -743,6 +752,20 @@ local function RowList(rows)
 	return table.concat(parts, "; ")
 end
 
+-- True when `unit` is an interrupter of the active Enemy interrupt.
+local function IsEnemyInterrupter(unit)
+	local it = IISControl.Active()
+	return it and it:IsEnemy() and it:IsInterrupter(unit) or false
+end
+
+-- IIS: the move plan of an Enemy interrupt's interrupter registers the AP of each step with the mercs
+-- that see it. Its winners start nothing, because interrupts do not nest before counter-interrupts (#16).
+local function PlanInterrupterMove(mover, dummies, n)
+	IIS.LogCommit(Mem.PlanMove(mover, nil, mover:GetPos()), "next check", mover)
+	local _, _, _, plan = IIS.FindIISMoveTrigger(mover, dummies, n)
+	Mem.PlanMove(mover, plan)
+end
+
 -- Adds a "iis" entry to the vanilla interrupt list when a trigger is found, or an "iis_enemy" entry
 -- when the mover is a merc.
 function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_result, interrupts, provoke_idx)
@@ -754,6 +777,10 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	end
 	if skip then
 		Count(stats.mover_skips, skip)
+		if skip == "interrupt active" and trigger_type == "move" and IIS.Config.system == "IIS" and #(dummies or {}) >= 2
+			and E.InCommandThread(mover) and IsEnemyInterrupter(mover) then
+			PlanInterrupterMove(mover, dummies, IIS.check_count)
+		end
 		if trigger_type == "attack reaction" and not return_result then
 			Log("after-attack check by %s skipped: %s", Name(mover), skip)
 		end
@@ -1002,7 +1029,7 @@ local function AIActionRegisters(unit)
 	if not g_AIExecutionController then return false end
 	local it = IISControl.Active()
 	if it and it:IsEnemy() then
-		return table.find(it:Interrupters(), unit) and true or false
+		return IsEnemyInterrupter(unit)
 	end
 	return E.IsAITurnEnemy(unit) and true or false
 end
