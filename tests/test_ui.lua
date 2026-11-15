@@ -75,3 +75,15 @@ t.case("UI.Begin: a request banner shows its label and the interrupter names in 
 	t.eq(shown[2], "preset")
 	t.eq(tostring(shown[3]), "Overwatch: Pie and Livewire")
 end)
+
+t.case("UI.BeginEnemy shows the Enemy Interrupt banner and UI.EndEnemy hides it", function()
+	local events = {}
+	Presets = { TacticalNotification = { Default = { iisInterrupt = true } } }
+	function ShowTacticalNotification(id, keep, text) events[#events + 1] = tostring(text) end
+	function HideTacticalNotification() events[#events + 1] = "hide" end
+	local it = IISInterrupt.Begin{ n = 1, mover = {}, interrupters = { Merc("Goon") }, cfg = IIS.Config, enemy = true }
+	IIS.UI.BeginEnemy(it)
+	IIS.UI.EndEnemy(it)
+	Presets, ShowTacticalNotification, HideTacticalNotification = nil, nil, function() end
+	t.eq(table.concat(events, ","), "Enemy Interrupt,hide")
+end)

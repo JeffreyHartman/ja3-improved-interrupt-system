@@ -3187,6 +3187,41 @@ t.case("Enemy interrupt: player orders and End Turn do nothing from the stop unt
 	t.eq(NetSyncEvents.EndTurn(netUniqueId), "vanilla")
 end)
 
+t.case("Enemy interrupt: the notification shows at the start and hides at the end, and the merc is selected after it", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	local shown = {}
+	FakeSelection(merc)
+	Q.UI = {
+		BeginEnemy = function() shown[#shown + 1] = "begin" end,
+		EndEnemy = function() shown[#shown + 1] = "end" end,
+	}
+	world.ai_script = function()
+		shown[#shown + 1] = "ai"
+		SelectedObj = e
+	end
+	MercMoves(merc, dummies)
+	t.eq(table.concat(shown, ","), "begin")
+	RunThreads()
+	t.eq(table.concat(shown, ","), "begin,ai,end")
+	t.eq(SelectedObj, merc)
+	t.eq(IISControl.Active(), false)
+end)
+
+t.case("Enemy interrupt: a merc that went down is not selected after the interrupt", function()
+	local merc, e, dummies = WalkingMerc(10)
+	FakeControl()
+	FakeSelection(merc)
+	Q.UI = { BeginEnemy = function() end, EndEnemy = function() end }
+	world.ai_script = function()
+		merc.down = true
+		SelectedObj = e
+	end
+	MercMoves(merc, dummies)
+	RunThreads()
+	t.eq(SelectedObj, e)
+end)
+
 -- True when the merc walks its whole path and no AI run starts.
 local function NoEnemyInterrupt(merc, dummies)
 	FakeControl()

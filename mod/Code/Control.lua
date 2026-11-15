@@ -484,6 +484,9 @@ local function RunEnemy(mover, req, n)
 		Log("INT #%d   interrupter %d: %s ap=%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark)
 	end
 	IISControl.Activate(it, req.dummy, req)
+	SafeCall(it, "UI.BeginEnemy", function()
+		IIS.UI.BeginEnemy(it)
+	end)
 	if req.stop then
 		SafeCall(it, "StopMover", IISControl.StopMover, it, req.dummy)
 	end
@@ -635,6 +638,16 @@ function IISControl.EndInterrupt(it, reason)
 	GiveBackEngine(it, taken)
 	if not it:IsEnemy() then
 		SafeCall(it, "UI.End", IIS.UI.End, it)
+	else
+		SafeCall(it, "UI.EndEnemy", function()
+			IIS.UI.EndEnemy(it)
+		end)
+		SafeCall(it, "reselect merc", function()
+			local mover = it:Mover()
+			if IsValid(mover) and not mover:IsDead() and not mover:IsIncapacitated() and SelectedObj ~= mover then
+				SelectObj(mover)
+			end
+		end)
 	end
 
 	local forced = {}
