@@ -26,7 +26,7 @@ return PlaceObj('ModDef', {
 		ReactionTime = 25,
 		BasicPercent = 60,
 		MovingTargetPenalty = "0",
-		VerboseLog = false,
+		LogLevel = "Error",
 		IOS = false,
 		IOSActions = "Shot only",
 		IOSAimLimit = "100%",

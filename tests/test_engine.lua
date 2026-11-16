@@ -54,7 +54,8 @@ const = {
 	SlabSizeX = 1200,
 	Combat = { AwareSightRange = 24 },
 }
-CurrentModOptions = {}
+-- The tests check lines of every level. A test that gives no LogLevel gets Debug.
+CurrentModOptions = { LogLevel = "Debug" }
 CurrentModId = "ImprovedInterruptSystem"
 
 function GameVar(name, default)
@@ -443,6 +444,9 @@ end)
 
 -- Gives the options to the mod as the game does when it loads them or when the player applies them.
 local function ApplyModOptions(options)
+	if rawget(options, "LogLevel") == nil then
+		options.LogLevel = "Debug"
+	end
 	CurrentModOptions = options
 	OnMsg.ApplyModOptions(CurrentModId)
 	return options
@@ -480,6 +484,64 @@ t.case("Options: the log line of the options gives IOS full aim under GBO 4", fu
 	t.eq(LogHas("mod options applied: .* ios_full_aim=true"), true)
 	ApplyModOptions({})
 	t.eq(Q.Config.ios_full_aim, false)
+end)
+
+local function WriteEachLevel()
+	log_lines = {}
+	Q.Error("an error line")
+	Q.Info("an info line")
+	Q.Debug("a debug line")
+	Q.Always("an identity line")
+end
+
+t.case("Log level Error: only error lines and identity lines, each with its level tag", function()
+	ApplyModOptions({ LogLevel = "Error" })
+	WriteEachLevel()
+	t.eq(table.concat(log_lines, "|"), "[IIS] [ERROR] an error line|[IIS] [INFO] an identity line")
+	ApplyModOptions({})
+end)
+
+t.case("Log level Info: error, info and identity lines, no debug lines", function()
+	ApplyModOptions({ LogLevel = "Info" })
+	WriteEachLevel()
+	t.eq(table.concat(log_lines, "|"),
+		"[IIS] [ERROR] an error line|[IIS] [INFO] an info line|[IIS] [INFO] an identity line")
+	ApplyModOptions({})
+end)
+
+t.case("Log level Debug: all lines", function()
+	ApplyModOptions({ LogLevel = "Debug" })
+	WriteEachLevel()
+	t.eq(table.concat(log_lines, "|"),
+		"[IIS] [ERROR] an error line|[IIS] [INFO] an info line|[IIS] [DEBUG] a debug line|[IIS] [INFO] an identity line")
+end)
+
+t.case("Log level: with no stored value or an unknown value, the level is Error", function()
+	CurrentModOptions = {}
+	OnMsg.ApplyModOptions(CurrentModId)
+	t.eq(Q.Config.log_level, "Error")
+	CurrentModOptions = { LogLevel = "Verbose" }
+	OnMsg.ApplyModOptions(CurrentModId)
+	t.eq(Q.Config.log_level, "Error")
+	ApplyModOptions({})
+end)
+
+t.case("Log level: the config line gives the level, and the mod writes it at level Error", function()
+	log_lines = {}
+	ApplyModOptions({ LogLevel = "Error" })
+	t.eq(LogHas("^%[IIS%] %[INFO%] mod options applied: .* log_level=Error "), true)
+	t.eq(LogHas("verbose="), false)
+	ApplyModOptions({})
+end)
+
+t.case("Log level: a line that the level filters out is not formatted", function()
+	ApplyModOptions({ LogLevel = "Error" })
+	log_lines = {}
+	local called = false
+	Q.Debug("%s", setmetatable({}, { __tostring = function() called = true return "x" end }))
+	t.eq(called, false)
+	t.eq(#log_lines, 0)
+	ApplyModOptions({})
 end)
 
 t.case("Options: with no stored value, the Interrupt System is IIS", function()
@@ -527,7 +589,10 @@ t.case("The options list: no removed option, and each option has the color tag o
 	t.eq(table.concat(names.InterruptSystem.ChoiceList, ","), "IIS,JA2 Classic,Off")
 	t.eq(names.InterruptSystem.DefaultValue, "IIS")
 	t.eq(names.InterruptSystem.DisplayName:match("<color (%w+)>"), group_colors["Interrupt System"])
-	t.eq(names.VerboseLog.DisplayName:match("<color (%w+)>"), group_colors["both systems"])
+	t.eq(names.VerboseLog, nil)
+	t.eq(table.concat(names.LogLevel.ChoiceList, ","), "Error,Info,Debug")
+	t.eq(names.LogLevel.DefaultValue, "Error")
+	t.eq(names.LogLevel.DisplayName:match("<color (%w+)>"), group_colors["both systems"])
 	t.eq(table.concat(names.IOSActions.ChoiceList, ","), "Shot only,Any action")
 	t.eq(names.IOSActions.DefaultValue, "Shot only")
 	t.eq(names.IOSActions.DisplayName:match("<color (%w+)>"), group_colors.IOS)

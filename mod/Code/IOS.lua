@@ -5,7 +5,7 @@
 IOS = IOS or {}
 
 local E = IIS.E
-local Log, Name, FormatAP = IIS.Log, IIS.Name, IIS.FormatAP
+local Info, Always, Name, FormatAP = IIS.Info, IIS.Always, IIS.Name, IIS.FormatAP
 
 -- The number of the last interrupt that IOS.InterruptRequest asked for.
 local ios_interrupt
@@ -136,25 +136,25 @@ end
 local function FinishOverwatcher(m, left, n, ended_by)
 	local overwatch = E.Overwatch(m)
 	if not overwatch then
-		Log("INT #%d overwatcher %s is no longer on Overwatch, pool %s lost", n, Name(m), FormatAP(left))
+		Info("INT #%d overwatcher %s is no longer on Overwatch, pool %s lost", n, Name(m), FormatAP(left))
 		return
 	end
 	if ended_by then
-		Log("INT #%d overwatcher %s started %s, Overwatch ends, pool %s lost", n, Name(m), tostring(ended_by),
+		Info("INT #%d overwatcher %s started %s, Overwatch ends, pool %s lost", n, Name(m), tostring(ended_by),
 			FormatAP(left))
 		m:InterruptPreparedAttack()
 		return
 	end
 	local cost = E.AttackCostRaw(m)
 	if cost <= 0 then
-		Log("INT #%d overwatcher %s: no attack cost, Overwatch ends", n, Name(m))
+		Info("INT #%d overwatcher %s: no attack cost, Overwatch ends", n, Name(m))
 		m:InterruptPreparedAttack()
 		return
 	end
 	local count = IOS.StorePool(overwatch, left, cost, E.CombatTurn(), IOS.SavedArgs(m))
-	Log("INT #%d overwatcher %s: pool %s, attack cost %s, attacks %d", n, Name(m), FormatAP(left), FormatAP(cost), count)
+	Info("INT #%d overwatcher %s: pool %s, attack cost %s, attacks %d", n, Name(m), FormatAP(left), FormatAP(cost), count)
 	if count < 1 and not overwatch.permanent then
-		Log("INT #%d overwatcher %s: the pool cannot pay for one attack, Overwatch ends", n, Name(m))
+		Info("INT #%d overwatcher %s: the pool cannot pay for one attack, Overwatch ends", n, Name(m))
 		m:InterruptPreparedAttack()
 		return
 	end
@@ -182,7 +182,7 @@ function IOS.InterruptRequest(mover, entry, n, entries)
 				limits[m] = ActionLimit(m)
 				notes[m] = string.format(" (overwatcher, pool %s, attack cost %s)", FormatAP(pool), FormatAP(cost))
 			else
-				Log("IOS: overwatcher %s cannot pay for an attack (pool %s, cost %s), vanilla handles it", Name(m),
+				Info("IOS: overwatcher %s cannot pay for an attack (pool %s, cost %s), vanilla handles it", Name(m),
 					FormatAP(pool), FormatAP(cost))
 			end
 		end
@@ -282,7 +282,7 @@ end
 -- GBO 4 wraps Unit:PrepareAttackArgs when its code loads, which can be after this mod.
 function OnMsg.ModsReloaded()
 	IIS.SafeCall(nil, "attack args hook", IOS.HookAttackArgs)
-	Log("attack args hook: %s", Unit.PrepareAttackArgs == IOS.attack_args_hook and "ours" or "REPLACED")
+	Always("attack args hook: %s", Unit.PrepareAttackArgs == IOS.attack_args_hook and "ours" or "REPLACED")
 	IOS.Install()
 end
 
@@ -292,4 +292,4 @@ function OnMsg.ApplyModOptions(mod_id)
 	IOS.Install()
 end
 
-Log("IOS loaded: on=%s", tostring(IIS.Config.ios))
+Always("IOS loaded: on=%s", tostring(IIS.Config.ios))

@@ -3,7 +3,7 @@
 -- of the active interrupt's request.
 
 local R = IISRules
-local Log = IIS.Log
+local Error, Always = IIS.Error, IIS.Always
 
 -- `percent` of `max` aim levels, rounded up, and never below `min`.
 local function LimitedMax(min, max, percent)
@@ -43,7 +43,7 @@ function IIS.HookAimRange()
 		local min, max = orig(self, action, target, ...)
 		local ok, new_min, new_max = pcall(InterrupterRange, req, self, action, target, min, max)
 		if not ok then
-			Log("INT #%s aim range failed: %s", tostring(it:Number()), tostring(new_min))
+			Error("INT #%s aim range failed: %s", tostring(it:Number()), tostring(new_min))
 			return min, max
 		end
 		return new_min, new_max
@@ -53,5 +53,5 @@ end
 
 function OnMsg.ModsReloaded()
 	IIS.SafeCall(nil, "aim range hook", IIS.HookAimRange)
-	Log("aim range hook: %s", Unit.GetBaseAimLevelRange == IIS.aim_hook and "ours" or "REPLACED")
+	Always("aim range hook: %s", Unit.GetBaseAimLevelRange == IIS.aim_hook and "ours" or "REPLACED")
 end

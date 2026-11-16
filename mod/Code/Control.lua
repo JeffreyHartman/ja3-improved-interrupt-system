@@ -6,7 +6,8 @@
 
 local R = IISRules
 local E = IIS.E
-local Log, Name, AP, Pos, NameList = IIS.Log, IIS.Name, IIS.AP, IIS.Pos, IIS.NameList
+local Error, Info, Debug, Always = IIS.Error, IIS.Info, IIS.Debug, IIS.Always
+local Name, AP, Pos, NameList = IIS.Name, IIS.AP, IIS.Pos, IIS.NameList
 
 IISControl = IISControl or {}
 
@@ -87,7 +88,7 @@ end
 local function SafeCall(it, what, f, ...)
 	local ok, err = pcall(f, ...)
 	if not ok then
-		Log("INT #%s %s failed: %s", it and tostring(it:Number()) or "-", what, tostring(err))
+		Error("INT #%s %s failed: %s", it and tostring(it:Number()) or "-", what, tostring(err))
 	end
 	return ok, err
 end
@@ -165,14 +166,14 @@ IISControl.Setup{
 
 function IIS.DumpStuck(it, why)
 	local n, mover = it:Number(), it:Mover()
-	Log("INT #%d STUCK? %s: mover cmd=%s interrupted=%s pain_thread=%s | %s", n, why,
+	Error("INT #%d STUCK? %s: mover cmd=%s interrupted=%s pain_thread=%s | %s", n, why,
 		tostring(mover.command), tostring(mover.interrupted), tostring((IsValidThread(mover.pain_thread))), RunningStateSnapshot())
 	for _, m in ipairs(it:Interrupters()) do
 		if it:CanAct(m) and RunsActionOrCommand(m) then
-			Log("INT #%d   merc %s cmd=%s idle=%s running=%s, command thread stack:", n, Name(m), tostring(m.command),
+			Error("INT #%d   merc %s cmd=%s idle=%s running=%s, command thread stack:", n, Name(m), tostring(m.command),
 				tostring((m:IsIdleCommand())), tostring(CombatActions_RunningState[m]))
 			for _, line in ipairs(ThreadStackLines(m.command_thread)) do
-				Log("INT #%d     %s", n, line)
+				Error("INT #%d     %s", n, line)
 			end
 		end
 	end
@@ -262,20 +263,20 @@ local takeover = {
 				parts[#parts + 1] = string.format("%s=%s", f, FieldToString(ctrl[f]))
 				ctrl[f] = false
 			end
-			Log("INT #%d AI camera tracking suspended: %s", it:Number(), table.concat(parts, " "))
+			Debug("INT #%d AI camera tracking suspended: %s", it:Number(), table.concat(parts, " "))
 		end,
 		give_label = "restore camera",
 		give = function(it, state)
 			local ctrl = state.ai_camera_ctrl
 			if not ctrl then return end
 			if ctrl ~= g_AIExecutionController then
-				Log("INT #%d AI camera tracking not restored: the AI controller changed", it:Number())
+				Debug("INT #%d AI camera tracking not restored: the AI controller changed", it:Number())
 				return
 			end
 			for _, f in ipairs(ai_camera_fields) do
 				ctrl[f] = state.ai_camera[f]
 			end
-			Log("INT #%d AI camera tracking restored", it:Number())
+			Debug("INT #%d AI camera tracking restored", it:Number())
 		end,
 	},
 	{
@@ -375,7 +376,7 @@ end
 -- that each granted interrupter had before its grant.
 local function BeginInterrupters(it, req, begin_note)
 	local n, mover = it:Number(), it:Mover()
-	Log("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s%s", n, req.label, Name(mover), Pos(mover), AP(mover),
+	Info("INT #%d BEGIN %s: mover=%s pos=%s ap=%s %s%s", n, req.label, Name(mover), Pos(mover), AP(mover),
 		req.where or "", begin_note or "")
 	local notes = req.notes or empty_table
 	local grants = req.ap_grants or empty_table
@@ -392,7 +393,7 @@ local function BeginInterrupters(it, req, begin_note)
 			SafeCall(nil, "AP grant", SetAP, m, grants[m])
 			grant_mark = string.format(" (granted, %s before)", IIS.FormatAP(ap_before[m]))
 		end
-		Log("INT #%d   interrupter %d: %s ap=%s%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark, grant_mark)
+		Info("INT #%d   interrupter %d: %s ap=%s%s%s%s", n, i, Name(m), AP(m), notes[m] or "", free_mark, grant_mark)
 	end
 	return ap_before
 end
@@ -402,7 +403,7 @@ local function Run(mover, req, n)
 	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = cfg }
 	local ap_before = BeginInterrupters(it, req, " in_command_thread=" .. tostring(E.InCommandThread(mover)))
 	SafeCall(nil, "before log", function()
-		Log("INT #%d before: %s | ai_controller=%s awareness_pending=%s | %s", n, UIState(it),
+		Debug("INT #%d before: %s | ai_controller=%s awareness_pending=%s | %s", n, UIState(it),
 			tostring(not not g_AIExecutionController), tostring(g_UnitAwarenessPending), RunningStateSnapshot())
 	end)
 
@@ -414,7 +415,7 @@ local function Run(mover, req, n)
 	TakeEngine(it, state)
 	SafeCall(it, "UI.Begin", IIS.UI.Begin, it, req.banner)
 	SafeCall(it, "control log", function()
-		Log("INT #%d control given: %s", n, UIState(it))
+		Debug("INT #%d control given: %s", n, UIState(it))
 	end)
 
 	local elapsed, next_heartbeat = 0, cfg.heartbeat_ms
@@ -439,7 +440,7 @@ local function Run(mover, req, n)
 					tostring(it:HasEndRequest()), UIState(it), RunningStateSnapshot())
 				if line ~= wait_line or elapsed - wait_logged >= cfg.heartbeat_repeat_ms then
 					wait_line, wait_logged = line, elapsed
-					Log("INT #%d waiting +%ss: %s", n, tostring(elapsed / 1000), line)
+					Debug("INT #%d waiting +%ss: %s", n, tostring(elapsed / 1000), line)
 				end
 			end)
 		end
@@ -452,7 +453,7 @@ end
 local function SendToIdle(it)
 	for _, m in ipairs(it:Living()) do
 		if not m:IsIdleCommand() then
-			Log("INT #%d sending %s to Idle (was %s)", it:Number(), Name(m), tostring(m.command))
+			Debug("INT #%d sending %s to Idle (was %s)", it:Number(), Name(m), tostring(m.command))
 			m:SetCommand("Idle")
 		end
 	end
@@ -463,7 +464,7 @@ end
 function IISControl.RunEnemyAI(it)
 	if active ~= it then return end
 	local ok = SafeCall(it, "AI run", function()
-		Log("INT #%d AI runs for %s", it:Number(), NameList(it:Living()))
+		Info("INT #%d AI runs for %s", it:Number(), NameList(it:Living()))
 		E.RunAI(it:Living(), it:Mover())
 	end)
 	if not ok then
@@ -508,19 +509,19 @@ end
 
 local function Start(mover, entries, entry_type, handler)
 	if not can_yield() then
-		Log("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
+		Info("interrupt skipped: cannot Sleep in this thread (mover=%s)", Name(mover))
 		return
 	end
 	if active then
-		Log("interrupt skipped: INT #%d is still active", active:Number())
+		Info("interrupt skipped: INT #%d is still active", active:Number())
 		return
 	end
 	if not IsValid(mover) or mover:IsDead() then
-		Log("interrupt skipped: mover %s is gone", Name(mover))
+		Info("interrupt skipped: mover %s is gone", Name(mover))
 		return
 	end
 	if mover:IsIncapacitated() then
-		Log("interrupt skipped: mover %s cannot act", Name(mover))
+		Info("interrupt skipped: mover %s cannot act", Name(mover))
 		return
 	end
 	local n = interrupt_count + 1
@@ -593,7 +594,7 @@ function Unit:ProvokeOpportunityAttacksFromList(list, ...)
 		end
 	end
 	if ours then
-		Log("provoke list done: mover=%s interrupted=%s stopped=%s pos=%s ap=%s", Name(self), tostring(self.interrupted),
+		Debug("provoke list done: mover=%s interrupted=%s stopped=%s pos=%s ap=%s", Name(self), tostring(self.interrupted),
 			tostring(IISControl.IsStopped(self)), Pos(self), AP(self))
 	end
 	return result
@@ -619,7 +620,7 @@ function IIS.Tick(it, elapsed)
 	if IsKindOf(sel, "Unit") and it:IsInterrupter(sel) and not it:CanAct(sel) then
 		local next_merc = it:Living()[1]
 		if next_merc then
-			Log("INT #%d %s is down, selecting %s", it:Number(), Name(sel), Name(next_merc))
+			Info("INT #%d %s is down, selecting %s", it:Number(), Name(sel), Name(next_merc))
 			SelectObj(next_merc)
 			IIS.UI.Refresh(it)
 		end
@@ -637,7 +638,7 @@ local function ExpireOverwatchAtTurnStart(it)
 		local ow = all[m]
 		if ow and not ow.permanent and (ow.expiration_turn or 0) > turn then
 			ow.expiration_turn = turn
-			Log("INT #%d %s: Overwatch ends at its next turn start", it:Number(), Name(m))
+			Info("INT #%d %s: Overwatch ends at its next turn start", it:Number(), Name(m))
 		end
 	end
 end
@@ -659,7 +660,7 @@ function IISControl.EndInterrupt(it, reason)
 					unit:GainAP(ap)
 				end
 			end
-			Log("INT #%d dropped queued action %s of %s, refunded %s raw AP", n, tostring(action_id), Name(unit), tostring(ap))
+			Debug("INT #%d dropped queued action %s of %s, refunded %s raw AP", n, tostring(action_id), Name(unit), tostring(ap))
 		end)
 	end
 
@@ -688,10 +689,10 @@ function IISControl.EndInterrupt(it, reason)
 	for _, m in ipairs(it:Interrupters()) do
 		aps[#aps + 1] = string.format("%s %s->%s", Name(m), IIS.FormatAP(counters.start_ap[m]), IsValid(m) and AP(m) or "?")
 	end
-	Log("INT #%d END (%s): %dms game time, actions=%d, ap: %s, forced: %s", n, reason, GameTime() - counters.start_time,
+	Info("INT #%d END (%s): %dms game time, actions=%d, ap: %s, forced: %s", n, reason, GameTime() - counters.start_time,
 		it:Actions(), table.concat(aps, ", "), #forced > 0 and table.concat(forced, " ") or "(none)")
 	SafeCall(it, "after log", function()
-		Log("INT #%d after end: %s | %s", n, UIState(it), RunningStateSnapshot())
+		Debug("INT #%d after end: %s | %s", n, UIState(it), RunningStateSnapshot())
 	end)
 
 	local ap_left = {}
@@ -714,12 +715,12 @@ function IISControl.StopMover(it, dummy)
 	local role = it:IsEnemy() and "merc" or "enemy"
 	if not IsValid(mover) or mover:IsDead() then return end
 	if mover.command ~= "CombatGoto" or not E.InCommandThread(mover) then
-		Log("INT #%d %s %s not stopped: command is %s", it:Number(), role, Name(mover), tostring(mover.command))
+		Info("INT #%d %s %s not stopped: command is %s", it:Number(), role, Name(mover), tostring(mover.command))
 		return
 	end
 	local path = mover.combat_path
 	if type(path) ~= "table" or #path == 0 or type(dummy) ~= "table" or not dummy.pos then
-		Log("INT #%d %s %s not stopped: no path", it:Number(), role, Name(mover))
+		Info("INT #%d %s %s not stopped: no path", it:Number(), role, Name(mover))
 		return
 	end
 	-- A walk step between two path nodes can lie between tiles, and paths_ap has costs only for tiles.
@@ -731,7 +732,7 @@ function IISControl.StopMover(it, dummy)
 		local prev_cost = obj:GetAP(path[1])
 		local new_cost = obj:GetAP(here)
 		if not new_cost then
-			Log("INT #%d %s %s: no path cost at the stop tile %s, no refund", it:Number(), role, Name(mover), tostring(tile))
+			Info("INT #%d %s %s: no path cost at the stop tile %s, no refund", it:Number(), role, Name(mover), tostring(tile))
 		end
 		if prev_cost and new_cost and new_cost < prev_cost then
 			refund = prev_cost - new_cost
@@ -748,7 +749,7 @@ function IISControl.StopMover(it, dummy)
 	table.iclear(path)
 	path[1] = here
 	mover.iis_stopped = mover.command_thread
-	Log("INT #%d %s %s stops at %s (%d path nodes dropped), refund=%s AP, ap now %s", it:Number(), role, Name(mover),
+	Info("INT #%d %s %s stops at %s (%d path nodes dropped), refund=%s AP, ap now %s", it:Number(), role, Name(mover),
 		tostring(tile), steps_left - 1, IIS.FormatAP(refund), AP(mover))
 end
 
@@ -760,7 +761,7 @@ function OnMsg.UnitMovementDone(unit)
 	local ctx = unit.ai_context
 	if ctx and ctx.ai_destination then
 		local dest = GetPackedPosAndStance(unit)
-		Log("enemy %s re-plans from its tile %s (old destination %s), ap=%s", Name(unit), Pos(unit),
+		Info("enemy %s re-plans from its tile %s (old destination %s), ap=%s", Name(unit), Pos(unit),
 			tostring(ctx.ai_destination), AP(unit))
 		ctx.ai_destination = dest
 	end
@@ -768,11 +769,11 @@ end
 
 function IIS.RunMercAction(it, action_id, unit, ap, ...)
 	if active ~= it then
-		Log("INT #%d action %s not run: interrupt already ended", it:Number(), tostring(action_id))
+		Info("INT #%d action %s not run: interrupt already ended", it:Number(), tostring(action_id))
 		return
 	end
 	local count = it:ActionStarted()
-	Log("INT #%d run action #%d %s merc=%s cost=%s ap_left=%s | %s", it:Number(), count, tostring(action_id), Name(unit),
+	Debug("INT #%d run action #%d %s merc=%s cost=%s ap_left=%s | %s", it:Number(), count, tostring(action_id), Name(unit),
 		IIS.FormatAP(ap), AP(unit), RunningStateSnapshot())
 	started[unit] = started[unit] or {}
 	table.insert(started[unit], action_id)
@@ -795,7 +796,7 @@ function IIS.TryRunQueue(it)
 		return not CombatActions_RunningState[e.unit] and R.CanStartAction(e.simultaneous, states)
 	end
 	local function on_drop(e)
-		Log("INT #%d dropped queued %s: the unit is gone", it:Number(), tostring(e.action_id))
+		Debug("INT #%d dropped queued %s: the unit is gone", it:Number(), tostring(e.action_id))
 	end
 	local e = it:TakeNext(can_start, on_drop)
 	while e do
@@ -859,14 +860,14 @@ function NetStartCombatAction(action_id, unit, ap, args, ...)
 		return orig_NetStartCombatAction(action_id, unit, ap, args, ...)
 	end
 	SafeCall(it, "NetStartCombatAction log", function()
-		Log("INT #%d NetStartCombatAction %s unit=%s ap=%s | cannot_start=%s vanilla_turn=%s controllable=%s ui_has_ap=%s awareness_pending=%s",
+		Debug("INT #%d NetStartCombatAction %s unit=%s ap=%s | cannot_start=%s vanilla_turn=%s controllable=%s ui_has_ap=%s awareness_pending=%s",
 			it:Number(), tostring(action_id), Name(unit), tostring(ap),
 			tostring(CombatActionCannotBeStarted(action_id, unit)), tostring(orig_IsNetPlayerTurn()),
 			tostring(unit and unit:CanBeControlled()), tostring(unit and ap and unit:UIHasAP(ap, action_id, args)),
 			tostring(g_UnitAwarenessPending))
 	end)
 	local result = orig_NetStartCombatAction(action_id, unit, ap, args, ...)
-	Log("INT #%d NetStartCombatAction %s result=%s", it:Number(), tostring(action_id), tostring(result))
+	Debug("INT #%d NetStartCombatAction %s result=%s", it:Number(), tostring(action_id), tostring(result))
 	return result
 end
 
@@ -881,7 +882,7 @@ end
 function StartCombatAction(action_id, unit, ap, ...)
 	local it = active
 	if it and it:IsEnemy() and unit and E.CanControlTeam(unit) then
-		Log("INT #%d %s of %s refused: enemy interrupt", it:Number(), tostring(action_id), Name(unit))
+		Info("INT #%d %s of %s refused: enemy interrupt", it:Number(), tostring(action_id), Name(unit))
 		CancelAction(it, action_id, unit)
 		return
 	end
@@ -895,7 +896,7 @@ function StartCombatAction(action_id, unit, ap, ...)
 		local target = type(args) == "table" and args.target or nil
 		local ok, allowed = SafeCall(it, "action limit", limit, action_id, target)
 		if not (ok and allowed) then
-			Log("INT #%d %s of %s refused by the action limit", it:Number(), tostring(action_id), Name(unit))
+			Info("INT #%d %s of %s refused by the action limit", it:Number(), tostring(action_id), Name(unit))
 			CancelAction(it, action_id, unit)
 			return
 		end
@@ -907,7 +908,7 @@ function StartCombatAction(action_id, unit, ap, ...)
 	IIS.TryRunQueue(it)
 	local waiting = it:QueueLength()
 	if waiting > 0 then
-		Log("INT #%d queued %s: %d waiting | %s", it:Number(), tostring(action_id), waiting, RunningStateSnapshot())
+		Debug("INT #%d queued %s: %d waiting | %s", it:Number(), tostring(action_id), waiting, RunningStateSnapshot())
 	end
 end
 
@@ -916,7 +917,7 @@ local function OnInterrupterActionStep(unit, what)
 	if not it or not it:IsInterrupter(unit) then return end
 	it:Activity()
 	if what == "end" then
-		Log("INT #%d merc %s action ended: ap_left=%s pos=%s status=%s | %s", it:Number(), Name(unit), AP(unit), Pos(unit),
+		Debug("INT #%d merc %s action ended: ap_left=%s pos=%s status=%s | %s", it:Number(), Name(unit), AP(unit), Pos(unit),
 			IIS.StatusList(unit), RunningStateSnapshot())
 		SafeCall(it, "UI.Refresh", IIS.UI.Refresh, it)
 		-- The frozen enemy's running action suspends VisibilityUpdate (Visibility.lua:1110), so a
@@ -956,7 +957,7 @@ function WaitOtherCombatActionsEnd(unit)
 	if not (it and it:IsInterrupter(unit)) then
 		return orig_WaitOtherCombatActionsEnd(unit)
 	end
-	Log("INT #%d WaitOtherCombatActionsEnd for %s waits for the other interrupters only | %s", it:Number(), Name(unit), RunningStateSnapshot())
+	Debug("INT #%d WaitOtherCombatActionsEnd for %s waits for the other interrupters only | %s", it:Number(), Name(unit), RunningStateSnapshot())
 	while active == it do
 		local wait = false
 		for _, m in ipairs(it:Interrupters()) do
@@ -982,13 +983,13 @@ function IModeCombatMovement:OnMouseButtonDown(pt, button, obj)
 	end
 	local prev = g_CurrentTeam
 	local player_idx = table.find(g_Teams, it:Top().team)
-	IIS.Verbose("INT #%d click %s on %s: g_CurrentTeam %s -> %s during the handler", it:Number(), tostring(button),
+	Debug("INT #%d click %s on %s: g_CurrentTeam %s -> %s during the handler", it:Number(), tostring(button),
 		obj and Name(obj) or "ground", tostring(prev), tostring(player_idx))
 	g_CurrentTeam = player_idx
 	local ok, result = pcall(orig_OnMouseButtonDown, self, pt, button, obj)
 	g_CurrentTeam = prev
 	if not ok then
-		Log("INT #%d click handler error: %s", it:Number(), tostring(result))
+		Error("INT #%d click handler error: %s", it:Number(), tostring(result))
 		error(result)
 	end
 	return result
@@ -998,14 +999,14 @@ local orig_EndTurn = NetSyncEvents.EndTurn
 function NetSyncEvents.EndTurn(player_id, ...)
 	local it = active
 	if it and it:IsEnemy() and player_id == netUniqueId then
-		Log("INT #%d End Turn ignored: enemy interrupt", it:Number())
+		Info("INT #%d End Turn ignored: enemy interrupt", it:Number())
 		return
 	end
 	if it and player_id == netUniqueId then
 		local press = it:EndTurnPressed()
 		if press == "requested" then
 			local busy = it:Busy()
-			Log("INT #%d end requested (End Turn). busy=%s", it:Number(), tostring(busy))
+			Info("INT #%d end requested (End Turn). busy=%s", it:Number(), tostring(busy))
 			if busy then
 				SafeCall(it, "UI.Refresh", IIS.UI.Refresh, it)
 			end
@@ -1052,7 +1053,7 @@ function OnMsg.SelectionChange()
 			if active ~= it then return end
 			local m = it:Living()[1]
 			if m and SelectedObj ~= m and not it:IsInterrupter(SelectedObj) then
-				Log("INT #%d %s is not an interrupter, selecting %s", it:Number(), Name(sel), Name(m))
+				Info("INT #%d %s is not an interrupter, selecting %s", it:Number(), Name(sel), Name(m))
 				SelectObj(m)
 			end
 		end)
@@ -1084,4 +1085,4 @@ function IIS.HookStatus()
 		IIS.UI and IIS.UI.HookStatus and IIS.UI.HookStatus() or "")
 end
 
-Log("control loaded: %s", IIS.HookStatus())
+Always("control loaded: %s", IIS.HookStatus())

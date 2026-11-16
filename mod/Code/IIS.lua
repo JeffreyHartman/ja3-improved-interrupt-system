@@ -22,7 +22,7 @@ IIS.Config = {
 	reaction_time = 25,          -- BASIC_REACTION_TIME_LENGTH
 	basic_pct = 60,              -- BASIC_PERCENTAGE_APS_REGISTERED
 	moving_target_penalty = 0,   -- maximum penalty of the Moving target to-hit modifier (MovingTarget.lua)
-	log_checks = false,          -- also log each watcher of each check
+	log_level = "Error",         -- "Error", "Info" or "Debug": the most detailed level that the log writes
 	heartbeat_ms = 5000,         -- interval of the state check while an interrupt waits for the player
 	heartbeat_repeat_ms = 30000, -- log interval of that state while it does not change
 	stuck_ms = 10000,            -- dump the merc's thread stack when one action runs longer than this
@@ -36,6 +36,7 @@ IIS.Config = {
 }
 
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
+local log_levels = { Error = 1, Info = 2, Debug = 3 }
 
 -- The game never removes a stored option that the mod no longer has, so "Enabled" and "System"
 -- of version 0.7.4 and earlier stay in the storage. They are read only while "InterruptSystem" is not
@@ -65,7 +66,7 @@ local function ApplyOptions()
 	cfg.reaction_time = tonumber(o.ReactionTime) or 25
 	cfg.basic_pct = tonumber(o.BasicPercent) or 60
 	cfg.moving_target_penalty = tonumber(o.MovingTargetPenalty) or 0
-	cfg.log_checks = o.VerboseLog == true
+	cfg.log_level = log_levels[o.LogLevel] and o.LogLevel or "Error"
 	cfg.ios = o.IOS == true
 	cfg.ios_actions = o.IOSActions == "Any action" and "any" or "shot"
 	cfg.ios_aim_limit = AimLimitOption(o.IOSAimLimit)
@@ -91,22 +92,44 @@ end
 -- Log
 
 -- The game buffers its log file during play, so each line flushes it.
-local function Log(fmt, ...)
+local function Write(tag, fmt, ...)
 	local ok, line = pcall(string.format, fmt, ...)
-	print("[IIS] " .. (ok and line or ("log format error: " .. tostring(line) .. " in " .. tostring(fmt))))
+	if not ok then
+		tag, line = "ERROR", "log format error: " .. tostring(line) .. " in " .. tostring(fmt)
+	end
+	print("[IIS] [" .. tag .. "] " .. line)
 	local flush = rawget(_G, "FlushLogFile")
 	if flush then
 		flush()
 	end
 end
-IIS.Log = Log
 
-local function Verbose(fmt, ...)
-	if IIS.Config.log_checks then
-		Log(fmt, ...)
+local function Writes(level)
+	return log_levels[IIS.Config.log_level] >= log_levels[level]
+end
+
+function IIS.Error(fmt, ...)
+	Write("ERROR", fmt, ...)
+end
+
+function IIS.Info(fmt, ...)
+	if Writes("Info") then
+		Write("INFO", fmt, ...)
 	end
 end
-IIS.Verbose = Verbose
+
+function IIS.Debug(fmt, ...)
+	if Writes("Debug") then
+		Write("DEBUG", fmt, ...)
+	end
+end
+
+--- Writes at every level. For the lines that identify the build and the options in a bug report.
+function IIS.Always(fmt, ...)
+	Write("INFO", fmt, ...)
+end
+
+local Error, Info, Debug, Always = IIS.Error, IIS.Info, IIS.Debug, IIS.Always
 
 local function Name(unit)
 	if not unit then return "nil" end
@@ -270,7 +293,7 @@ function E.AttackCostRaw(unit)
 	local last = cost_error_logged[unit]
 	if not last or last.combat ~= combat or last.turn ~= turn then
 		cost_error_logged[unit] = { combat = combat, turn = turn }
-		Log("attack cost lookup failed for %s: %s", Name(unit), tostring(cost))
+		Error("attack cost lookup failed for %s: %s", Name(unit), tostring(cost))
 	end
 	return -1
 end
@@ -403,7 +426,7 @@ end
 function OnMsg.CombatComputedVisibility()
 	local ok, err = pcall(IIS.RecordVisibility)
 	if not ok then
-		Log("RecordVisibility failed: %s", tostring(err))
+		Error("RecordVisibility failed: %s", tostring(err))
 	end
 end
 
@@ -411,7 +434,7 @@ end
 function IIS.LogCommit(result, why, mover)
 	if not result then return end
 	if result.off_path then
-		Log("IIS plan of %s (%s): the tile %s is not on the planned path. Steps after %d not counted.", Name(mover), why,
+		Info("IIS plan of %s (%s): the tile %s is not on the planned path. Steps after %d not counted.", Name(mover), why,
 			Pos(mover), result.done)
 		return
 	end
@@ -420,7 +443,7 @@ function IIS.LogCommit(result, why, mover)
 		parts[i] = string.format("%s+%d=%d", Name(add.unit), add.delta, add.counter)
 	end
 	if #parts > 0 then
-		Log("IIS commit (%s) mover=%s steps through %d: %s", why, Name(mover), result.through, table.concat(parts, " "))
+		Debug("IIS commit (%s) mover=%s steps through %d: %s", why, Name(mover), result.through, table.concat(parts, " "))
 	end
 end
 
@@ -600,7 +623,7 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 		end
 		if skip then
 			Count(stats.watcher_skips, skip)
-			Verbose("  check #%d watcher %s skipped: %s", n, Name(w), skip)
+			Debug("  check #%d watcher %s skipped: %s", n, Name(w), skip)
 		else
 			stats.checked = stats.checked + 1
 			local row = { unit = w }
@@ -631,7 +654,7 @@ function IIS.FindClassicMoveTrigger(mover, dummies, n)
 			else
 				row.detail = "no LOS on the path"
 			end
-			Verbose("  check #%d watcher %s: %s", n, Name(w), row.detail)
+			Debug("  check #%d watcher %s: %s", n, Name(w), row.detail)
 			rows[#rows + 1] = row
 		end
 	end
@@ -650,7 +673,7 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 		local skip = IIS.ObserverSkipReason(w, mover)
 		if skip then
 			Count(stats.watcher_skips, skip)
-			Verbose("  check #%d watcher %s skipped: %s", n, Name(w), skip)
+			Debug("  check #%d watcher %s skipped: %s", n, Name(w), skip)
 		else
 			local win_skip = IIS.WinSkipReason(w, "IIS")
 			local row = { unit = w, counter = Mem.Counter(w, mover), los = {}, adds = {}, win_skip = win_skip }
@@ -675,7 +698,7 @@ function IIS.FindIISMoveTrigger(mover, dummies, n)
 		end
 		row.detail = string.format("counter %d + %d over %d seen steps, reaction time %s%s", row.counter,
 			row.cum[#dummies] or 0, steps, row.win_skip and "-" or tostring(row.rt), row.win_skip and (" (cannot win: " .. row.win_skip .. ")") or "")
-		Verbose("  check #%d watcher %s: %s", n, Name(row.unit), row.detail)
+		Debug("  check #%d watcher %s: %s", n, Name(row.unit), row.detail)
 	end
 	-- CombatGoto removes passed steps from its dummy list, so the plan keeps their positions.
 	local plan = { steps = {}, first = first, rows = {} }
@@ -701,12 +724,12 @@ function IIS.FindAttackTrigger(mover, n)
 		local targeted = targets[w] or false
 		if skip then
 			Count(stats.watcher_skips, skip)
-			Verbose("  check #%d watcher %s skipped: %s", n, Name(w), skip)
+			Debug("  check #%d watcher %s skipped: %s", n, Name(w), skip)
 		elseif system == "JA2 Classic" then
 			if not targeted then
-				Verbose("  check #%d watcher %s: not attacked", n, Name(w))
+				Debug("  check #%d watcher %s: not attacked", n, Name(w))
 			elseif E.SeesNow(w, mover) then
-				Verbose("  check #%d watcher %s: saw the attacker", n, Name(w))
+				Debug("  check #%d watcher %s: saw the attacker", n, Name(w))
 			else
 				stats.checked = stats.checked + 1
 				local d = E.DistTiles(w, mover:GetPos())
@@ -721,7 +744,7 @@ function IIS.FindAttackTrigger(mover, n)
 				local won, margin, how = R.ClassicDuel(wp, mp, true, true)
 				local row = { unit = w, won = won, margin = margin, how = how,
 					detail = string.format("unseen attacker, dist %d: %d vs %d -> %s", d, wp, mp, won and "WIN" or "lose") }
-				Verbose("  check #%d watcher %s: %s", n, Name(w), row.detail)
+				Debug("  check #%d watcher %s: %s", n, Name(w), row.detail)
 				rows[#rows + 1] = row
 			end
 		else
@@ -730,7 +753,7 @@ function IIS.FindAttackTrigger(mover, n)
 			row.rt = R.IISReactionTime(IIS.IISWatcher(w), IIS.RulesConfig())
 			row.detail = string.format("counter %d, reaction time %d, %s", row.counter, row.rt,
 				row.sees and (targeted and "attacked" or "sees attacker") or "does not see attacker")
-			Verbose("  check #%d watcher %s: %s", n, Name(w), row.detail)
+			Debug("  check #%d watcher %s: %s", n, Name(w), row.detail)
 			rows[#rows + 1] = row
 		end
 	end
@@ -787,7 +810,7 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 			PlanInterrupterMove(mover, dummies, IIS.check_count)
 		end
 		if trigger_type == "attack reaction" and not return_result then
-			Log("after-attack check by %s skipped: %s", Name(mover), skip)
+			Info("after-attack check by %s skipped: %s", Name(mover), skip)
 		end
 		return interrupts, provoke_idx
 	end
@@ -796,7 +819,7 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	local n = IIS.check_count
 	local system = IIS.Config.system
 	local real = E.InCommandThread(mover)
-	Verbose("check #%d %s %s mover=%s cmd=%s steps=%d real=%s vanilla_idx=%s", n, system, trigger_type, Name(mover),
+	Debug("check #%d %s %s mover=%s cmd=%s steps=%d real=%s vanilla_idx=%s", n, system, trigger_type, Name(mover),
 		tostring(mover.command), #(dummies or {}), tostring(real), tostring(provoke_idx))
 
 	local idx, winners, rows, plan
@@ -820,7 +843,7 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	end
 	if not idx then
 		if trigger_type ~= "move" then
-			Log("check #%d %s after attack by %s: no winner: %s", n, system, Name(mover), #rows > 0 and RowList(rows) or "(no watcher)")
+			Info("check #%d %s after attack by %s: no winner: %s", n, system, Name(mover), #rows > 0 and RowList(rows) or "(no watcher)")
 		end
 		return interrupts, provoke_idx
 	end
@@ -839,29 +862,29 @@ function IIS.AddTrigger(mover, trigger_type, dummies, visible_only, return_resul
 	local entry = { is_enemy_interrupt and "iis_enemy" or "iis", winner_units[1], info, dummies[idx] }
 
 	if interrupts and provoke_idx < idx then
-		Log("check #%d %s mover=%s: %d winner(s) at %s, but a vanilla interrupt (%s) comes first at step %d. Ours waits for the next check.",
+		Info("check #%d %s mover=%s: %d winner(s) at %s, but a vanilla interrupt (%s) comes first at step %d. Ours waits for the next check.",
 			n, system, Name(mover), #winner_units, where, tostring(interrupts[1][1]), provoke_idx)
 		return interrupts, provoke_idx
 	end
 	if real then
-		Log("check #%d %s TRIGGER mover=%s at %s: %s", n, system, Name(mover), where, RowList(winners))
+		Info("check #%d %s TRIGGER mover=%s at %s: %s", n, system, Name(mover), where, RowList(winners))
 	else
 		-- AIExecutionController:SelectPlayingUnits runs the same check to group its units.
-		Log("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(winner_units))
+		Info("check #%d %s trigger in an AI planning check, mover=%s at %s: %s", n, system, Name(mover), where, NameList(winner_units))
 	end
 	-- The provoke-list wrapper starts an Enemy interrupt after the vanilla entries (Control.lua).
 	if interrupts and provoke_idx == idx and is_enemy_interrupt then
-		Log("check #%d   same step as vanilla %s, vanilla runs first", n, tostring(interrupts[1][1]))
+		Info("check #%d   same step as vanilla %s, vanilla runs first", n, tostring(interrupts[1][1]))
 		interrupts[#interrupts + 1] = entry
 		return interrupts, provoke_idx
 	end
 	if interrupts and provoke_idx == idx then
 		table.insert(interrupts, 1, entry)
-		Log("check #%d   same step as vanilla %s, ours runs first", n, tostring(interrupts[2][1]))
+		Info("check #%d   same step as vanilla %s, ours runs first", n, tostring(interrupts[2][1]))
 		return interrupts, provoke_idx
 	end
 	if interrupts then
-		Log("check #%d   vanilla interrupt %s at later step %d is dropped for now. The game checks again after ours.", n, tostring(interrupts[1][1]), provoke_idx)
+		Info("check #%d   vanilla interrupt %s at later step %d is dropped for now. The game checks again after ours.", n, tostring(interrupts[1][1]), provoke_idx)
 	end
 	return { entry }, idx
 end
@@ -890,7 +913,7 @@ local function AddCollective(st_winners, mover, n)
 			end
 			if skip then
 				if skip ~= "interrupter" then
-					Log("INT #%d collective: %s -> %s skipped: %s", n, Name(leader), Name(mate), skip)
+					Info("INT #%d collective: %s -> %s skipped: %s", n, Name(leader), Name(mate), skip)
 				end
 			else
 				local chance = R.CollectiveChance(
@@ -898,7 +921,7 @@ local function AddCollective(st_winners, mover, n)
 					{ level = mate:GetLevel(), agility = mate:GetProperty("Agility"), wisdom = mate:GetProperty("Wisdom") })
 				local roll = E.Rand(100)
 				local ok = roll < chance
-				Log("INT #%d collective: %s -> %s chance=%d roll=%d %s", n, Name(leader), Name(mate), chance, roll, ok and "JOINS" or "no")
+				Info("INT #%d collective: %s -> %s chance=%d roll=%d %s", n, Name(leader), Name(mate), chance, roll, ok and "JOINS" or "no")
 				if ok then
 					st_winners[#st_winners + 1] = mate
 					joined[#joined + 1] = mate
@@ -919,7 +942,7 @@ function IIS.InterruptRequest(mover, entry, n)
 	local cfg = IIS.Config
 	local info, dummy = entry[3], entry[4]
 	if type(info) ~= "table" or not info.mercs then
-		Log("interrupt skipped: bad entry from an older version")
+		Info("interrupt skipped: bad entry from an older version")
 		return
 	end
 	local winners = {}
@@ -927,11 +950,11 @@ function IIS.InterruptRequest(mover, entry, n)
 		if IsValid(m) and not m:IsIncapacitated() and not IIS.WinSkipReason(m, info.system) then
 			winners[#winners + 1] = m
 		else
-			Log("interrupt: winner %s can no longer act, dropped", Name(m))
+			Info("interrupt: winner %s can no longer act, dropped", Name(m))
 		end
 	end
 	if #winners == 0 then
-		Log("interrupt skipped: no winner of check #%d can act", info.check or 0)
+		Info("interrupt skipped: no winner of check #%d can act", info.check or 0)
 		return
 	end
 
@@ -985,7 +1008,7 @@ function Unit:CheckProvokeOpportunityAttacks(action, trigger_type, target_dummie
 	-- This runs in the enemy's command thread. An error here would end the enemy's command.
 	local ok, a, b = pcall(IIS.AddTrigger, self, trigger_type, target_dummies_all, visible_only, return_result, interrupts, provoke_idx)
 	if not ok then
-		Log("check failed for %s: %s", Name(self), tostring(a))
+		Error("check failed for %s: %s", Name(self), tostring(a))
 		return interrupts, provoke_idx
 	end
 	return a, b
@@ -1010,7 +1033,7 @@ function IIS.RegisterAction(unit, action_id, ap)
 	end
 	if #parts > 0 then
 		IIS.turn_stats.registered = IIS.turn_stats.registered + 1
-		Log("IIS register %s by %s cost=%d 1.13 AP (%s AP): %s", tostring(action_id), Name(unit), ap113,
+		Debug("IIS register %s by %s cost=%d 1.13 AP (%s AP): %s", tostring(action_id), Name(unit), ap113,
 			FormatAP(ap), table.concat(parts, " "))
 	end
 end
@@ -1042,7 +1065,7 @@ end
 local function RegisterActionLogged(unit, action_id, ap)
 	local ok, err = pcall(IIS.RegisterAction, unit, action_id, ap)
 	if not ok then
-		Log("RegisterAction failed: %s", tostring(err))
+		Error("RegisterAction failed: %s", tostring(err))
 	end
 end
 
@@ -1062,7 +1085,7 @@ function OnMsg.RunCombatAction(action_id, unit, ap)
 	end
 	Count(IIS.turn_stats.enemy_actions, unit)
 	local behavior = unit.ai_context and unit.ai_context.behavior
-	Log("enemy action %s unit=%s cost=%s ap_left=%s pos=%s behavior=%s status=%s",
+	Debug("enemy action %s unit=%s cost=%s ap_left=%s pos=%s behavior=%s status=%s",
 		tostring(action_id), Name(unit), FormatAP(ap), AP(unit), Pos(unit),
 		tostring(behavior and (behavior.id or behavior.class)), StatusList(unit))
 	if IIS.Config.system == "IIS" and action_id ~= "Move" and (ap or 0) > 0 and AIActionRegisters(unit) then
@@ -1086,7 +1109,7 @@ function OnMsg.Attack(action, results, attack_args, combat_starting, attacker, t
 	for u in pairs(set) do
 		hit[#hit + 1] = u
 	end
-	Log("enemy attack resolved: %s by %s target=%s units=%s cmd=%s t=%d", tostring(action and action.id), Name(attacker),
+	Debug("enemy attack resolved: %s by %s target=%s units=%s cmd=%s t=%d", tostring(action and action.id), Name(attacker),
 		IsKindOf(target, "Unit") and Name(target) or tostring(target), NameList(hit), tostring(attacker.command), GameTime())
 end
 
@@ -1099,12 +1122,12 @@ function IIS.HookAttackTrace()
 	IIS.exec_hook = function(self, action, cost_ap, attack_args, results, ...)
 		local traced = IsTracedEnemy(self)
 		if traced then
-			Log("enemy attack exec begin: %s by %s cost=%s ap=%s cmd=%s t=%d", tostring(action and action.id), Name(self),
+			Debug("enemy attack exec begin: %s by %s cost=%s ap=%s cmd=%s t=%d", tostring(action and action.id), Name(self),
 				FormatAP(cost_ap), AP(self), tostring(self.command), GameTime())
 		end
 		local r = pack_params(orig(self, action, cost_ap, attack_args, results, ...))
 		if traced then
-			Log("enemy attack exec end: %s by %s ap=%s cmd=%s t=%d", tostring(action and action.id), Name(self), AP(self),
+			Debug("enemy attack exec end: %s by %s ap=%s cmd=%s t=%d", tostring(action and action.id), Name(self), AP(self),
 				tostring(self.command), GameTime())
 		end
 		return unpack_params(r)
@@ -1114,7 +1137,7 @@ end
 
 function OnMsg.CombatActionEnd(unit)
 	if IsTracedEnemy(unit) then
-		Log("enemy action ended: %s ap=%s cmd=%s t=%d", Name(unit), AP(unit), tostring(unit.command), GameTime())
+		Debug("enemy action ended: %s ap=%s cmd=%s t=%d", Name(unit), AP(unit), tostring(unit.command), GameTime())
 	end
 end
 
@@ -1124,7 +1147,7 @@ function IIS.LogLoadedMods()
 		local ok, version = pcall(mod.GetVersionString, mod)
 		parts[#parts + 1] = string.format("%s (%s %s)", tostring(mod.title), tostring(mod.id), ok and tostring(version) or "?")
 	end
-	Log("mods loaded: %s", #parts > 0 and table.concat(parts, "; ") or "(none)")
+	Always("mods loaded: %s", #parts > 0 and table.concat(parts, "; ") or "(none)")
 end
 
 function OnMsg.UnitMovementDone(unit)
@@ -1132,7 +1155,7 @@ function OnMsg.UnitMovementDone(unit)
 		IIS.LogCommit(Mem.MoveDone(unit, unit:GetPos()), "move done", unit)
 	end)
 	if not ok then
-		Log("move commit failed: %s", tostring(err))
+		Error("move commit failed: %s", tostring(err))
 	end
 end
 
@@ -1147,22 +1170,22 @@ end
 local function ResetCombatState(why)
 	Mem.Clear()
 	IIS.attack_targets = {}
-	Log("combat state reset (%s)", why)
+	Info("combat state reset (%s)", why)
 end
 
 -- On a load, dynamic_data is the saved combat (Combat.lua:313), and gv_IIS already holds the saved
 -- counters and seen marks.
 function OnMsg.CombatStart(dynamic_data)
 	if dynamic_data then
-		Log("combat state kept (CombatStart from a load)")
+		Info("combat state kept (CombatStart from a load)")
 	else
 		ResetCombatState("CombatStart")
 	end
-	Log("CombatStart system=%s %s", IIS.Config.system, IIS.HookStatus())
+	Info("CombatStart system=%s %s", IIS.Config.system, IIS.HookStatus())
 end
 
 function OnMsg.CombatEnd()
-	Log("CombatEnd: checks=%d interrupts=%d", IIS.check_count, IISControl.InterruptCount())
+	Info("CombatEnd: checks=%d interrupts=%d", IIS.check_count, IISControl.InterruptCount())
 	ResetCombatState("CombatEnd")
 end
 
@@ -1171,7 +1194,7 @@ end
 function OnMsg.PreLoadSessionData()
 	Mem.Loaded()
 	IIS.attack_targets = {}
-	Log("load: move plans dropped, system=%s %s", IIS.Config.system, IIS.HookStatus())
+	Info("load: move plans dropped, system=%s %s", IIS.Config.system, IIS.HookStatus())
 end
 
 function OnMsg.TurnStart(team_idx)
@@ -1180,7 +1203,7 @@ function OnMsg.TurnStart(team_idx)
 	if team then
 		Mem.TurnStart(team.units)
 	end
-	Log("TurnStart team=%s side=%s control=%s system=%s %s", tostring(team_idx), tostring(team and team.side),
+	Info("TurnStart team=%s side=%s control=%s system=%s %s", tostring(team_idx), tostring(team and team.side),
 		tostring(team and team.control), IIS.Config.system, IIS.HookStatus())
 	if team and team.control ~= "UI" then
 		local parts = {}
@@ -1189,16 +1212,16 @@ function OnMsg.TurnStart(team_idx)
 				parts[#parts + 1] = string.format("%s=%s/%s", Name(u), AP(u), FormatAP(E.MaxAPRaw(u)))
 			end
 		end
-		Log("  AP/max AP at turn start: %s", #parts > 0 and table.concat(parts, ", ") or "(none)")
+		Info("  AP/max AP at turn start: %s", #parts > 0 and table.concat(parts, ", ") or "(none)")
 	end
 end
 
 function OnMsg.TurnEnded(team_idx)
 	local stats = IIS.turn_stats
-	Log("TurnEnded team=%s: hook calls=%d, triggers=%d, watchers checked=%d, IIS registrations=%d", tostring(team_idx),
+	Info("TurnEnded team=%s: hook calls=%d, triggers=%d, watchers checked=%d, IIS registrations=%d", tostring(team_idx),
 		stats.calls, stats.triggers, stats.checked, stats.registered)
-	Log("  mover skips: %s", CountsToString(stats.mover_skips))
-	Log("  watcher skips: %s", CountsToString(stats.watcher_skips))
+	Debug("  mover skips: %s", CountsToString(stats.mover_skips))
+	Debug("  watcher skips: %s", CountsToString(stats.watcher_skips))
 	local team = g_Teams and g_Teams[team_idx]
 	if team and team.control ~= "UI" then
 		local parts = {}
@@ -1207,12 +1230,12 @@ function OnMsg.TurnEnded(team_idx)
 				parts[#parts + 1] = string.format("%s=%d", Name(u), stats.enemy_actions[u] or 0)
 			end
 		end
-		Log("  actions per living unit: %s", #parts > 0 and table.concat(parts, ", ") or "(none)")
+		Debug("  actions per living unit: %s", #parts > 0 and table.concat(parts, ", ") or "(none)")
 		local rows = {}
 		for i, c in ipairs(Mem.Counters()) do
 			rows[i] = string.format("%s<-%s=%d", tostring(c.watcher), tostring(c.mover), c.counter)
 		end
-		Log("  IIS counters at turn end: %s", #rows > 0 and table.concat(rows, " ") or "(none)")
+		Info("  IIS counters at turn end: %s", #rows > 0 and table.concat(rows, " ") or "(none)")
 	end
 end
 
@@ -1224,10 +1247,10 @@ end
 
 function IIS.LogConfig(why)
 	local c = IIS.Config
-	Log("%s: system=%s collective=%s enemy_interrupts=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s verbose=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s ios_free_aim=%s ios_full_aim=%s",
+	Always("%s: system=%s collective=%s enemy_interrupts=%s after_interrupt=%s reaction_time=%s basic_pct=%s moving_target_penalty=%s log_level=%s ios=%s ios_actions=%s ios_aim_limit=%s interrupt_aim_limit=%s ios_free_aim=%s ios_full_aim=%s",
 		why, c.system, tostring(c.collective), tostring(c.enemy_interrupts), c.after_interrupt, tostring(c.reaction_time), tostring(c.basic_pct),
 		tostring(c.moving_target_penalty),
-		tostring(c.log_checks), tostring(c.ios), c.ios_actions, tostring(c.ios_aim_limit), tostring(c.interrupt_aim_limit),
+		c.log_level, tostring(c.ios), c.ios_actions, tostring(c.ios_aim_limit), tostring(c.interrupt_aim_limit),
 		tostring(c.ios_free_aim), tostring(c.ios_full_aim))
 end
 

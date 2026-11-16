@@ -141,7 +141,17 @@ For a quick combat test, open the Mod Editor from the main menu. Its Cheats menu
 
 ## Log
 
-All mod lines in the game log start with `[IIS]`. `tools/log.sh` also shows `[LUA ERROR]` lines with their stack, and mod load errors.
+All mod lines in the game log start with `[IIS]` and the level of the line: `[IIS] [ERROR]`, `[IIS] [INFO]` or `[IIS] [DEBUG]`. `tools/log.sh` also shows `[LUA ERROR]` lines with their stack, and mod load errors.
+
+The "Log level" option sets which lines the mod writes. Each level also writes the lines of the levels before it:
+
+| Level | Lines |
+|---|---|
+| `Error` (default) | A part of the mod failed: `... failed`, `STUCK?`, `handler failed`, `log format error`. |
+| `Info` | The checks and interrupts: `TRIGGER`, `INT #N BEGIN`/`END`, skip reasons, `stops at`, the turn start and turn end lines. |
+| `Debug` | All lines: `IIS register`/`commit`, the line for each watcher of a check, `waiting`, `run action`, AI camera tracking, the UI lines. |
+
+The identity lines show at every level with the tag `[INFO]`: `loaded`, `control loaded`, `IOS loaded`, `UI loaded`, `ModsReloaded`, `mods loaded`, the hook status lines and the options line (`log_level=`). Each written line flushes the log file. Use `Debug` for a playtest. Calls are `IIS.Error`, `IIS.Info`, `IIS.Debug` and `IIS.Always`.
 
 The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP by `const.Scale.AP`). GBO 4 changes that scale and keeps raw AP, so with GBO 4 the log AP values are 10 times the vanilla values. For example, `110->1.8` is 11 vanilla AP at the start and 0.18 at the end, and `165/121` is 16.5 of a maximum of 12.1. Divide by 10 before you compare a GBO 4 log with a vanilla log or with an attack cost in vanilla AP.
 

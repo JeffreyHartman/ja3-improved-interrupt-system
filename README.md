@@ -56,7 +56,7 @@ The options list shows each group of options in one color: one color for the Int
 | IOS free aim levels | IOS | 1 | The minimum aim level of a merc's shot in an IOS interrupt. These levels cost no AP. Killzone gives at least 1. |
 | IOS full aim under GBO 4 | IOS | off | Under GBO 4 in old CTH mode, an IOS shot gets the full aim bonus in place of half. |
 | Moving target penalty | Both systems | 0 | A to-hit penalty for a shot in an interrupt at a unit that moved across the line of fire. It applies to enemy interrupters too. |
-| Verbose log | Both systems | off | Writes more detail to the game log. |
+| Log level | Both systems | Error | How much the mod writes to the game log: Error, Info or Debug. Set Info when you report a bug. |
 
 A setting from version 0.7.4 or earlier becomes a new setting. "JA2 1.13 interrupts (Experimental) = off" becomes "Interrupt System = Off", and "Classic" becomes "JA2 Classic".
 

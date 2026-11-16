@@ -14,6 +14,11 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 - Collective interrupts work for enemy winners. A joiner must be on the team of the winner (#49).
 - The "Interrupt aim limit" option and the moving target penalty apply to enemy interrupters too (#50).
 - An enemy interrupt ends after 45 seconds if the AI does not finish. Enemy Overwatch fires before an enemy interrupt on the same step, and a merc that it downs gets no interrupt. The mod blocks saves during an enemy interrupt, and a load ends it (#51).
+- The "Log level" option: Error (the default), Info or Debug. Each level also writes the lines of the levels before it. Each `[IIS]` line gives its level, for example `[IIS] [INFO]`. The lines that give the version, the loaded mods, the hooks and the options show at every level (#55).
+
+### Removed
+
+- The "Verbose log" option. The Debug log level writes the lines that it gave (#55).
 
 ## 0.8.2 (build 14), not released
 

@@ -3,7 +3,7 @@
 
 IIS.UI = IIS.UI or {}
 local UI = IIS.UI
-local Log, Name = IIS.Log, IIS.Name
+local Error, Debug, Always, Name = IIS.Error, IIS.Debug, IIS.Always, IIS.Name
 
 -- A TacticalNotification is the banner at the top center of the screen ("Enemy Turn"). A lower
 -- SortKey wins, and the enemy turn banners use 0 or more.
@@ -56,7 +56,7 @@ function UI.EnsureBannerPreset()
 	})
 	group = Presets.TacticalNotification and Presets.TacticalNotification.Default
 	local ok = group and group[banner_id] and true or false
-	Log("UI banner preset registered: %s", tostring(ok))
+	Debug("UI banner preset registered: %s", tostring(ok))
 	return ok
 end
 
@@ -160,7 +160,7 @@ function HUDMercClass:SetupStyle(...)
 	if mark then
 		local applied, err = pcall(ApplyMark, self, mark)
 		if not applied then
-			Log("UI portrait mark %s failed for %s: %s", tostring(mark), Name(self.context), tostring(err))
+			Error("UI portrait mark %s failed for %s: %s", tostring(mark), Name(self.context), tostring(err))
 		end
 	else
 		if self.iis_tag and self.iis_tag.window_state ~= "destroying" then
@@ -235,7 +235,7 @@ function UI.Begin(it, banner)
 		CombatLog("important", T{Untranslated("<names> <verb> <mover>."), names = Untranslated(NamesText(units)),
 			verb = Untranslated(#units == 1 and "interrupts" or "interrupt"), mover = it:Mover():GetLogName()})
 	end)
-	Log("INT #%d UI shown: banner=%s portraits_refreshed=%d camera=%s", it:Number(), tostring(banner_shown),
+	Debug("INT #%d UI shown: banner=%s portraits_refreshed=%d camera=%s", it:Number(), tostring(banner_shown),
 		portraits, tostring(camera))
 end
 
@@ -246,7 +246,7 @@ function UI.BeginEnemy(it)
 	IIS.SafeCall(it, "UI banner", function()
 		shown = UI.ShowBanner()
 	end)
-	Log("INT #%d UI enemy banner: %s", it:Number(), tostring(shown))
+	Debug("INT #%d UI enemy banner: %s", it:Number(), tostring(shown))
 end
 
 function UI.EndEnemy(it)
@@ -272,7 +272,7 @@ function UI.End(it)
 	safe(it, "UI combat log", function()
 		CombatLog("important", Untranslated("Interrupt over."))
 	end)
-	Log("INT #%d UI cleared", it:Number())
+	Debug("INT #%d UI cleared", it:Number())
 end
 
 function UI.HookStatus()
@@ -287,7 +287,7 @@ function OnMsg.ModsReloaded()
 	IIS.SafeCall(nil, "UI preset", UI.EnsureBannerPreset)
 	IIS.SafeCall(nil, "attack trace", IIS.HookAttackTrace)
 	IIS.SafeCall(nil, "mod list", IIS.LogLoadedMods)
-	Log("ModsReloaded: IIS %s active, %s", IIS.version, IIS.HookStatus())
+	Always("ModsReloaded: IIS %s active, %s", IIS.version, IIS.HookStatus())
 end
 
-Log("UI loaded: %s", UI.HookStatus())
+Always("UI loaded: %s", UI.HookStatus())
