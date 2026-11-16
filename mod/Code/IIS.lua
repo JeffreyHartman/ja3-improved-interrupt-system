@@ -368,6 +368,27 @@ function E.TeamSees(team, unit)
 	return team and HasVisibilityTo(team, unit) and true or false
 end
 
+--- Returns whether `unit` sees `mover`, whether `mover` sees `unit`, and whether the team of `mover`
+-- sees `unit`.
+function E.Visibility(unit, mover)
+	return E.SeesNow(unit, mover), E.SeesNow(mover, unit), E.TeamSees(mover.team, unit)
+end
+
+--- Returns the look-at point of the camera and its 2D distance to `unit`, or nil when the game
+-- gives no look-at point.
+function E.Camera(unit)
+	local _, look = GetCamera()
+	if not look then return nil end
+	return look, unit:GetDist2D(look)
+end
+
+--- Returns the raw AP that the GBO 4 Shooting Stance of `unit` carries to its next turn, or nil
+-- when `unit` has no Shooting Stance.
+function E.CarriedAP(unit)
+	local effect = unit:GetStatusEffect("shooting_stance")
+	return effect and (effect:ResolveValue("AP_Carried") or 0) or nil
+end
+
 function E.SameTile(a, b)
 	return a and b and a:Equal2D(b) or false
 end

@@ -175,6 +175,10 @@ The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP
 | `INT #- <type> handler failed` | A provoke-list handler failed. Vanilla gets the entries of that group. |
 | `INT #N UI enemy banner` | The "Enemy Interrupt" banner showed or did not show. |
 | `INT #N AI runs for` | The AI starts for the interrupters of an Enemy interrupt. |
+| `INT #N   visibility` | At the start of an Enemy interrupt, for each interrupter: whether it sees the mover, whether the mover sees it, and whether the player team sees it. |
+| `INT #N camera at BEGIN`, `at END`, `2s after END` | The look-at point of the camera and its distance to the mover, in game units, during an Enemy interrupt. |
+| `INT #N   ... shooting_stance=` | At the end of an Enemy interrupt, whether each interrupter has the GBO 4 Shooting Stance, and the raw AP that the stance carries to its next turn (`AP_Carried`). |
+| `INT #N unit died` | A unit died during an interrupt, with the attacker. |
 | `INT #N ... refused: enemy interrupt` | A player unit tried an action during an Enemy interrupt. The action did not start. |
 | `INT #N End Turn ignored: enemy interrupt` | The player pressed End Turn during an Enemy interrupt. Nothing happened. |
 | `same step as vanilla ..., vanilla runs first` | An enemy on Overwatch triggered on the same step as an enemy interrupt. The Overwatch fires first. |

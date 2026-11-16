@@ -494,9 +494,43 @@ end
 
 -- Stops the merc on its step in its own command thread, so that its move ends, and starts the AI
 -- of the interrupters in a new thread.
+local function LogCamera(it, when)
+	local look, dist = E.Camera(it:Mover())
+	Info("INT #%d camera %s: look-at=%s, distance to mover=%s", it:Number(), when, tostring(look), tostring(dist))
+end
+
+local function LogEnemyBegin(it)
+	local mover = it:Mover()
+	for _, m in ipairs(it:Interrupters()) do
+		local sees, seen, team_sees = E.Visibility(m, mover)
+		Info("INT #%d   visibility %s: sees mover=%s, mover sees it=%s, player team sees it=%s", it:Number(), Name(m),
+			tostring(sees), tostring(seen), tostring(team_sees))
+	end
+	LogCamera(it, "at BEGIN")
+end
+
+local function LogEnemyEnd(it)
+	for _, m in ipairs(it:Interrupters()) do
+		if IsValid(m) then
+			local carried = E.CarriedAP(m)
+			if carried then
+				Info("INT #%d   %s shooting_stance=yes AP_Carried=%s raw", it:Number(), Name(m), tostring(carried))
+			else
+				Info("INT #%d   %s shooting_stance=no", it:Number(), Name(m))
+			end
+		end
+	end
+	LogCamera(it, "at END")
+	CreateGameTimeThread(function()
+		sleep(2000)
+		SafeCall(nil, "camera log", LogCamera, it, "2s after END")
+	end)
+end
+
 local function RunEnemy(mover, req, n)
 	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = IIS.Config, enemy = true }
 	IISControl.Activate(it, req.dummy, req, BeginInterrupters(it, req))
+	SafeCall(it, "begin playtest log", LogEnemyBegin, it)
 	SafeCall(it, "UI.BeginEnemy", function()
 		IIS.UI.BeginEnemy(it)
 	end)
@@ -694,6 +728,9 @@ function IISControl.EndInterrupt(it, reason)
 	SafeCall(it, "after log", function()
 		Debug("INT #%d after end: %s | %s", n, UIState(it), RunningStateSnapshot())
 	end)
+	if it:IsEnemy() then
+		SafeCall(it, "end playtest log", LogEnemyEnd, it)
+	end
 
 	local ap_left = {}
 	for m, before in pairs(taken.ap_before) do
@@ -755,6 +792,12 @@ end
 
 -- The AI plays its attacks from ai_context.ai_destination (AIPlayAttacks, CombatAI.lua:211), so a
 -- stopped enemy plans them from where it stands.
+function OnMsg.UnitDied(unit, attacker)
+	if active then
+		Info("INT #%d unit died: %s, attacker %s", active:Number(), Name(unit), Name(attacker))
+	end
+end
+
 function OnMsg.UnitMovementDone(unit)
 	if not unit.iis_stopped then return end
 	unit.iis_stopped = nil
