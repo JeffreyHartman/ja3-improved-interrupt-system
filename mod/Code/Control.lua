@@ -492,11 +492,23 @@ function IISControl.WatchEnemyAI(it, ai_thread)
 	end
 end
 
--- Stops the merc on its step in its own command thread, so that its move ends, and starts the AI
--- of the interrupters in a new thread.
 local function LogCamera(it, when)
 	local look, dist = E.Camera(it:Mover())
 	Info("INT #%d camera %s: look-at=%s, distance to mover=%s", it:Number(), when, tostring(look), tostring(dist))
+end
+
+local function LogStances(it, when)
+	for _, m in ipairs(it:Interrupters()) do
+		if IsValid(m) then
+			local carried = E.CarriedAP(m)
+			if carried then
+				Info("INT #%d   %s %s: shooting_stance=yes AP_Carried=%s%s", it:Number(), Name(m), when, tostring(carried),
+					carried == "unset" and "" or " raw")
+			else
+				Info("INT #%d   %s %s: shooting_stance=no", it:Number(), Name(m), when)
+			end
+		end
+	end
 end
 
 local function LogEnemyBegin(it)
@@ -506,20 +518,12 @@ local function LogEnemyBegin(it)
 		Info("INT #%d   visibility %s: sees mover=%s, mover sees it=%s, player team sees it=%s", it:Number(), Name(m),
 			tostring(sees), tostring(seen), tostring(team_sees))
 	end
+	LogStances(it, "at BEGIN")
 	LogCamera(it, "at BEGIN")
 end
 
 local function LogEnemyEnd(it)
-	for _, m in ipairs(it:Interrupters()) do
-		if IsValid(m) then
-			local carried = E.CarriedAP(m)
-			if carried then
-				Info("INT #%d   %s shooting_stance=yes AP_Carried=%s raw", it:Number(), Name(m), tostring(carried))
-			else
-				Info("INT #%d   %s shooting_stance=no", it:Number(), Name(m))
-			end
-		end
-	end
+	LogStances(it, "at END")
 	LogCamera(it, "at END")
 	CreateGameTimeThread(function()
 		sleep(2000)
@@ -527,10 +531,12 @@ local function LogEnemyEnd(it)
 	end)
 end
 
+-- Stops the merc on its step in its own command thread, so that its move ends, and starts the AI
+-- of the interrupters in a new thread.
 local function RunEnemy(mover, req, n)
 	local it = IISInterrupt.Begin{ n = n, mover = mover, interrupters = req.interrupters, cfg = IIS.Config, enemy = true }
 	IISControl.Activate(it, req.dummy, req, BeginInterrupters(it, req))
-	SafeCall(it, "begin playtest log", LogEnemyBegin, it)
+	SafeCall(it, "begin diagnostics log", LogEnemyBegin, it)
 	SafeCall(it, "UI.BeginEnemy", function()
 		IIS.UI.BeginEnemy(it)
 	end)
@@ -729,7 +735,7 @@ function IISControl.EndInterrupt(it, reason)
 		Debug("INT #%d after end: %s | %s", n, UIState(it), RunningStateSnapshot())
 	end)
 	if it:IsEnemy() then
-		SafeCall(it, "end playtest log", LogEnemyEnd, it)
+		SafeCall(it, "end diagnostics log", LogEnemyEnd, it)
 	end
 
 	local ap_left = {}
@@ -792,12 +798,6 @@ end
 
 -- The AI plays its attacks from ai_context.ai_destination (AIPlayAttacks, CombatAI.lua:211), so a
 -- stopped enemy plans them from where it stands.
-function OnMsg.UnitDied(unit, attacker)
-	if active then
-		Info("INT #%d unit died: %s, attacker %s", active:Number(), Name(unit), Name(attacker))
-	end
-end
-
 function OnMsg.UnitMovementDone(unit)
 	if not unit.iis_stopped then return end
 	unit.iis_stopped = nil
@@ -877,6 +877,20 @@ function Unit:CanBeControlled(...)
 		return false, "iis_not_interrupter"
 	end
 	return orig_CanBeControlled(self, ...)
+end
+
+-- The game calls OnDie when the hit lands. It sends UnitDied only after the dying animation, which
+-- can end after the interrupt.
+local orig_OnDie = Unit.OnDie
+function Unit:OnDie(attacker, hit_descr, ...)
+	local it = active
+	if it then
+		SafeCall(nil, "death log", function()
+			Info("INT #%d unit %s: %s, attacker %s", it:Number(), self:ShouldGetDowned(hit_descr) and "downed" or "died",
+				Name(self), Name(attacker))
+		end)
+	end
+	return orig_OnDie(self, attacker, hit_descr, ...)
 end
 
 -- Vanilla refuses while any unit has an action that is not in PostAction, and the frozen enemy's
@@ -1111,6 +1125,7 @@ IIS.control_hooks = {
 	{ "StartCombatAction", function() return StartCombatAction end, StartCombatAction },
 	{ "WaitOtherCombatActionsEnd", function() return WaitOtherCombatActionsEnd end, WaitOtherCombatActionsEnd },
 	{ "IsIdleOrRunningBehavior", function() return Unit.IsIdleOrRunningBehavior end, Unit.IsIdleOrRunningBehavior },
+	{ "OnDie", function() return Unit.OnDie end, Unit.OnDie },
 	{ "OnMouseButtonDown", function() return IModeCombatMovement.OnMouseButtonDown end, IModeCombatMovement.OnMouseButtonDown },
 	{ "EndTurn", function() return NetSyncEvents.EndTurn end, NetSyncEvents.EndTurn },
 }

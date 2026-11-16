@@ -179,6 +179,7 @@ Unit = {
 		end
 	end,
 	CanBeControlled = function() return "vanilla" end,
+	OnDie = function(self) self.on_die_called = true end,
 	IsIdleOrRunningBehavior = function() return "vanilla" end,
 	GetBaseAimLevelRange = vanilla_aim_range,
 	PrepareAttackArgs = vanilla_prepare_attack_args,
@@ -3436,9 +3437,9 @@ t.case("Enemy interrupt: an AI run that fails calls E.StopAI and ends the interr
 	t.eq(Unit.CanBeControlled(merc), "vanilla")
 end)
 
--- Runs `fn` with fakes of the engine reads of the playtest lines: visibility, camera and Shooting
+-- Runs `fn` with fakes of the engine reads of the Enemy interrupt diagnostics: visibility, camera and Shooting
 -- Stance. `o.camera` is the list of look-at distances that E.Camera returns, one per call.
-local function WithPlaytestReads(o, fn)
+local function WithDiagnosticReads(o, fn)
 	local saved = { E.Visibility, E.Camera, E.CarriedAP }
 	E.Visibility = function(unit) return table.unpack(o.visibility[unit.session_id] or { false, false, false }) end
 	Q.UI = { BeginEnemy = function() end, EndEnemy = function() end }
@@ -3455,39 +3456,44 @@ local function WithPlaytestReads(o, fn)
 	end
 end
 
-t.case("Enemy interrupt playtest lines: BEGIN gives the visibility of each interrupter in both directions", function()
+t.case("Enemy interrupt diagnostics: BEGIN gives the visibility of each interrupter in both directions", function()
 	local merc, e, dummies = WalkingMerc(10)
 	FakeControl()
 	local n = IISControl.InterruptCount() + 1
-	WithPlaytestReads({ visibility = { e = { true, false, false } } }, function()
+	WithDiagnosticReads({ visibility = { e = { true, false, false } } }, function()
 		MercMoves(merc, dummies)
 		RunThreads()
 	end)
 	t.eq(LogHas("^%[IIS%] %[INFO%] INT #" .. n .. "   visibility e#e: sees mover=true, mover sees it=false, player team sees it=false$"), true)
 end)
 
-t.case("Enemy interrupt playtest lines: a unit that dies in an interrupt writes one line, a death outside one writes none", function()
+t.case("Enemy interrupt diagnostics: a unit that dies or goes down in an interrupt writes one line, and vanilla OnDie still runs", function()
 	local merc, e, dummies = WalkingMerc(10)
 	FakeControl()
 	local n = IISControl.InterruptCount() + 1
+	local other = FakeUnit({ id = "other" })
+	function merc:ShouldGetDowned() return false end
+	function other:ShouldGetDowned() return true end
 	world.ai_script = function(units)
-		merc.dead = true
-		OnMsg.UnitDied(merc, units[1])
+		Unit.OnDie(merc, units[1], {})
+		Unit.OnDie(other, units[1], {})
 	end
 	MercMoves(merc, dummies)
 	RunThreads()
 	t.eq(LogHas("^%[IIS%] %[INFO%] INT #" .. n .. " unit died: merc#merc, attacker e#e$"), true)
+	t.eq(LogHas("^%[IIS%] %[INFO%] INT #" .. n .. " unit downed: other#other, attacker e#e$"), true)
+	t.eq(merc.on_die_called, true)
 	log_lines = {}
-	OnMsg.UnitDied(e, merc)
+	Unit.OnDie(e, merc, {})
 	t.eq(LogHas("unit died"), false)
 end)
 
-t.case("Enemy interrupt playtest lines: the camera look-at and its distance to the mover at BEGIN, END and 2 s after END", function()
+t.case("Enemy interrupt diagnostics: the camera look-at and its distance to the mover at BEGIN, END and 2 s after END", function()
 	local merc, _, dummies = WalkingMerc(10)
 	FakeControl()
 	local n = IISControl.InterruptCount() + 1
 	local end_time
-	WithPlaytestReads({ visibility = {}, camera = { 287, 10322, 290 } }, function()
+	WithDiagnosticReads({ visibility = {}, camera = { 287, 10322, 290 } }, function()
 		MercMoves(merc, dummies)
 		RunThreads()
 		end_time = game_time
@@ -3499,30 +3505,35 @@ t.case("Enemy interrupt playtest lines: the camera look-at and its distance to t
 	t.eq(LogHas("^%[IIS%] %[INFO%] INT #" .. n .. " camera 2s after END: look%-at=look3, distance to mover=290$"), true)
 end)
 
-t.case("Enemy interrupt playtest lines: END gives the Shooting Stance and the carried AP of each interrupter", function()
+t.case("Enemy interrupt diagnostics: BEGIN and END give the Shooting Stance and the carried AP of each interrupter", function()
 	local merc, e, dummies = WalkingMerc(10)
 	FakeControl()
 	local n = IISControl.InterruptCount() + 1
-	WithPlaytestReads({ visibility = {}, carried = { e = 6000 } }, function()
+	WithDiagnosticReads({ visibility = {}, carried = { e = 6000 } }, function()
 		MercMoves(merc, dummies)
 		RunThreads()
 	end)
-	t.eq(LogHas("^%[IIS%] %[INFO%] INT #" .. n .. "   e#e shooting_stance=yes AP_Carried=6000 raw$"), true)
-	local merc2, _, dummies2 = WalkingMerc(10)
-	FakeControl()
-	WithPlaytestReads({ visibility = {} }, function()
-		MercMoves(merc2, dummies2)
-		RunThreads()
-	end)
-	t.eq(LogHas("e#e shooting_stance=no$"), true)
+	t.eq(LogHas("^%[IIS%] %[INFO%] INT #" .. n .. "   e#e at BEGIN: shooting_stance=yes AP_Carried=6000 raw$"), true)
+	t.eq(LogHas("^%[IIS%] %[INFO%] INT #" .. n .. "   e#e at END: shooting_stance=yes AP_Carried=6000 raw$"), true)
+	for _, case in ipairs({ { carried = {}, line = "e#e at END: shooting_stance=no$" },
+		{ carried = { e = "unset" }, line = "e#e at END: shooting_stance=yes AP_Carried=unset$" } }) do
+		local merc2, _, dummies2 = WalkingMerc(10)
+		FakeControl()
+		WithDiagnosticReads({ visibility = {}, carried = case.carried }, function()
+			MercMoves(merc2, dummies2)
+			RunThreads()
+		end)
+		t.eq(LogHas(case.line), true, case.line)
+	end
 end)
 
-t.case("Enemy interrupt playtest lines: at log level Error, none of them are in the log", function()
+t.case("Enemy interrupt diagnostics: at log level Error, none of them are in the log", function()
 	local merc, _, dummies = WalkingMerc(10)
 	FakeControl()
 	ApplyModOptions({ LogLevel = "Error" })
-	world.ai_script = function(units) OnMsg.UnitDied(merc, units[1]) end
-	local ok, err = pcall(WithPlaytestReads, { visibility = {}, camera = { 1, 2, 3 }, carried = { e = 6000 } }, function()
+	function merc:ShouldGetDowned() return false end
+	world.ai_script = function(units) Unit.OnDie(merc, units[1], {}) end
+	local ok, err = pcall(WithDiagnosticReads, { visibility = {}, camera = { 1, 2, 3 }, carried = { e = 6000 } }, function()
 		MercMoves(merc, dummies)
 		RunThreads()
 		RunThreads()

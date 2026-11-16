@@ -90,6 +90,7 @@ These overrides change behavior only while an interrupt is active:
 | `NetSyncEvents.EndTurn`, `NetSyncLocalEffects.EndTurn` | End a Player interrupt instead of the turn. During an Enemy interrupt they do nothing and log `End Turn ignored: enemy interrupt`. |
 | `HUDMercClass.SetupStyle` (in `UI.lua`) | Marks the portraits. |
 | `OnMsg.CanSaveGameQuery` | Blocks saves during an interrupt. |
+| `Unit:OnDie` | Logs `unit died` or `unit downed`, then calls vanilla. Behavior does not change. |
 
 A load during an interrupt ends the interrupt with the reason `load`. `CanLoadGame` does not ask the mod, so `OnMsg.DoneMap` ends the interrupt before the map closes. It runs outside the mover's command thread, so the mover destructor stays on the old mover. A map change without a load gives the reason `map_change`. The end skips the Stop of the mover.
 
@@ -148,10 +149,10 @@ The "Log level" option sets which lines the mod writes. Each level also writes t
 | Level | Lines |
 |---|---|
 | `Error` (default) | A part of the mod failed: `... failed`, `STUCK?`, `handler failed`, `log format error`. |
-| `Info` | The checks and interrupts: `TRIGGER`, `INT #N BEGIN`/`END`, skip reasons, `stops at`, the turn start and turn end lines. |
-| `Debug` | All lines: `IIS register`/`commit`, the line for each watcher of a check, `waiting`, `run action`, AI camera tracking, the UI lines. |
+| `Info` | The checks and interrupts: `TRIGGER`, `INT #N BEGIN`/`END`, skip reasons, `stops at`, `TurnStart`, `AP/max AP at turn start`, `TurnEnded` and `IIS counters at turn end`. |
+| `Debug` | All lines: `IIS register`/`commit`, the line for each watcher of a check, the skip counts and action counts of a turn, `waiting`, `run action`, AI camera tracking, the UI lines. |
 
-The identity lines show at every level with the tag `[INFO]`: `loaded`, `control loaded`, `IOS loaded`, `UI loaded`, `ModsReloaded`, `mods loaded`, the hook status lines and the options line (`log_level=`). Each written line flushes the log file. Use `Debug` for a playtest. Calls are `IIS.Error`, `IIS.Info`, `IIS.Debug` and `IIS.Always`.
+The identity lines show at every level with the tag `[INFO]`: `loaded`, `control loaded`, `IOS loaded`, `UI loaded`, `ModsReloaded`, `mods loaded`, the hook status lines and the options line (`log_level=`). Each written line flushes the log file. `Info` gives the facts of a playtest, and `Debug` adds the detail for a bug. Calls are `IIS.Error`, `IIS.Info`, `IIS.Debug` and `IIS.Always`.
 
 The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP by `const.Scale.AP`). GBO 4 changes that scale and keeps raw AP, so with GBO 4 the log AP values are 10 times the vanilla values. For example, `110->1.8` is 11 vanilla AP at the start and 0.18 at the end, and `165/121` is 16.5 of a maximum of 12.1. Divide by 10 before you compare a GBO 4 log with a vanilla log or with an attack cost in vanilla AP.
 
@@ -177,8 +178,8 @@ The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP
 | `INT #N AI runs for` | The AI starts for the interrupters of an Enemy interrupt. |
 | `INT #N   visibility` | At the start of an Enemy interrupt, for each interrupter: whether it sees the mover, whether the mover sees it, and whether the player team sees it. |
 | `INT #N camera at BEGIN`, `at END`, `2s after END` | The look-at point of the camera and its distance to the mover, in game units, during an Enemy interrupt. |
-| `INT #N   ... shooting_stance=` | At the end of an Enemy interrupt, whether each interrupter has the GBO 4 Shooting Stance, and the raw AP that the stance carries to its next turn (`AP_Carried`). |
-| `INT #N unit died` | A unit died during an interrupt, with the attacker. |
+| `INT #N   ... at BEGIN: shooting_stance=`, `at END:` | At the start and the end of an Enemy interrupt, whether each interrupter has the GBO 4 Shooting Stance, and the raw AP that the stance carries to its next turn (`AP_Carried`, `unset` before the stance first sets it). GBO 4 sets it at the end of the enemy turn and adds it at the next turn start, before `TurnStart`. |
+| `INT #N unit died`, `unit downed` | A hit during an interrupt killed a unit or put it down, with the attacker. The line comes when the hit lands, before the dying animation. |
 | `INT #N ... refused: enemy interrupt` | A player unit tried an action during an Enemy interrupt. The action did not start. |
 | `INT #N End Turn ignored: enemy interrupt` | The player pressed End Turn during an Enemy interrupt. Nothing happened. |
 | `same step as vanilla ..., vanilla runs first` | An enemy on Overwatch triggered on the same step as an enemy interrupt. The Overwatch fires first. |
@@ -188,4 +189,4 @@ The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP
 | `INT #N STUCK?` | A merc stayed busy for more than 10 seconds. |
 | `INT #N ... failed` | A part of the interrupt failed with a Lua error. The interrupt continues without that part. |
 | `stops at`, `re-plans from its tile` | "Stop" mode: the enemy stays on its tile, gets back AP and plans its attacks again. |
-| `TurnEnded` | The check counts of the turn, the skip reasons and the IIS counters by session id (`a<-enemy=5`). |
+| `TurnEnded` | The check counts of the turn and the IIS counters by session id (`a<-enemy=5`). At `Debug`, also the skip reasons and the action counts. |

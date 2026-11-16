@@ -36,7 +36,11 @@ IIS.Config = {
 }
 
 local systems = { IIS = true, ["JA2 Classic"] = true, Off = true }
-local log_levels = { Error = 1, Info = 2, Debug = 3 }
+local log_levels = {
+	Error = { rank = 1, tag = "ERROR" },
+	Info = { rank = 2, tag = "INFO" },
+	Debug = { rank = 3, tag = "DEBUG" },
+}
 
 -- The game never removes a stored option that the mod no longer has, so "Enabled" and "System"
 -- of version 0.7.4 and earlier stay in the storage. They are read only while "InterruptSystem" is not
@@ -95,7 +99,7 @@ end
 local function Write(tag, fmt, ...)
 	local ok, line = pcall(string.format, fmt, ...)
 	if not ok then
-		tag, line = "ERROR", "log format error: " .. tostring(line) .. " in " .. tostring(fmt)
+		tag, line = log_levels.Error.tag, "log format error: " .. tostring(line) .. " in " .. tostring(fmt)
 	end
 	print("[IIS] [" .. tag .. "] " .. line)
 	local flush = rawget(_G, "FlushLogFile")
@@ -104,29 +108,22 @@ local function Write(tag, fmt, ...)
 	end
 end
 
-local function Writes(level)
-	return log_levels[IIS.Config.log_level] >= log_levels[level]
-end
-
-function IIS.Error(fmt, ...)
-	Write("ERROR", fmt, ...)
-end
-
-function IIS.Info(fmt, ...)
-	if Writes("Info") then
-		Write("INFO", fmt, ...)
+local function Leveled(level)
+	local rank, tag = log_levels[level].rank, log_levels[level].tag
+	return function(fmt, ...)
+		if log_levels[IIS.Config.log_level].rank >= rank then
+			Write(tag, fmt, ...)
+		end
 	end
 end
 
-function IIS.Debug(fmt, ...)
-	if Writes("Debug") then
-		Write("DEBUG", fmt, ...)
-	end
-end
+IIS.Error = Leveled("Error")
+IIS.Info = Leveled("Info")
+IIS.Debug = Leveled("Debug")
 
 --- Writes at every level. For the lines that identify the build and the options in a bug report.
 function IIS.Always(fmt, ...)
-	Write("INFO", fmt, ...)
+	Write(log_levels.Info.tag, fmt, ...)
 end
 
 local Error, Info, Debug, Always = IIS.Error, IIS.Info, IIS.Debug, IIS.Always
@@ -382,11 +379,11 @@ function E.Camera(unit)
 	return look, unit:GetDist2D(look)
 end
 
---- Returns the raw AP that the GBO 4 Shooting Stance of `unit` carries to its next turn, or nil
--- when `unit` has no Shooting Stance.
+--- Returns the raw AP that the GBO 4 Shooting Stance of `unit` carries to its next turn, "unset"
+-- when the stance has no carried AP yet, or nil when `unit` has no Shooting Stance.
 function E.CarriedAP(unit)
 	local effect = unit:GetStatusEffect("shooting_stance")
-	return effect and (effect:ResolveValue("AP_Carried") or 0) or nil
+	return effect and (effect:ResolveValue("AP_Carried") or "unset") or nil
 end
 
 function E.SameTile(a, b)

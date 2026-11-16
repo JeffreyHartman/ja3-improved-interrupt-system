@@ -15,8 +15,7 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 - The "Interrupt aim limit" option and the moving target penalty apply to enemy interrupters too (#50).
 - An enemy interrupt ends after 45 seconds if the AI does not finish. Enemy Overwatch fires before an enemy interrupt on the same step, and a merc that it downs gets no interrupt. The mod blocks saves during an enemy interrupt, and a load ends it (#51).
 - The "Log level" option: Error (the default), Info or Debug. Each level also writes the lines of the levels before it. Each `[IIS]` line gives its level, for example `[IIS] [INFO]`. The lines that give the version, the loaded mods, the hooks and the options show at every level (#55).
-
-- At the Info log level, an Enemy interrupt writes the visibility of each interrupter, the camera position, the Shooting Stance and carried AP of each interrupter, and each unit that dies (#56).
+- At the Info log level, an Enemy interrupt writes the visibility of each interrupter, the camera position, and the Shooting Stance and carried AP of each interrupter. Each unit that dies or goes down during an interrupt writes a line (#56).
 
 ### Removed
 
