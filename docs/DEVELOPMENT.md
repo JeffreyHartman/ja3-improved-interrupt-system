@@ -136,7 +136,7 @@ The tests do not cover the rest of `UI.lua` or anything that needs the game.
 
 `tools/deploy.sh` copies `mod/` to the game's Mods folder. It has the paths of a Steam Proton install on Linux. Change the paths for your system.
 
-To read the game log, use `scripts/log.sh` of the [ja3-play](https://github.com/JeffreyHartman/ja3-play) skill with the IIS tag: `log.sh -x 'collective=' '\[IIS\]|\[PROBE\]'`. Add `-f` to follow the log. It reads the log of the debug build and of the retail build. `-x 'collective='` drops the option dump that the mod writes after each load.
+To read the game log, use `scripts/log.sh` of the [ja3-play](https://github.com/JeffreyHartman/ja3-play/tree/main/skills/ja3-play) skill with the IIS tag: `log.sh -x 'collective=' '\[IIS\]|\[PROBE\]'`. Add `-f` to follow the log. It reads the log of the debug build and of the retail build. `-x 'collective='` drops the option dump that the mod writes after each load.
 
 An agent drives the debug build with the `ja3-play` skill. To play fights with its auto-player, run `tools/autoplay-iis.lua` with the skill's `lua.py` once after each launch, then the skill's `lua/autoplay.lua`. The hook file lets the auto-player act in IIS interrupts and adds the IIS win check to its enemy AP line. `tools/wait-interrupt.sh` ends each player turn until an IIS interrupt starts. Its `-q` option quick saves at the start of each player turn, for a load test during an interrupt.
 
