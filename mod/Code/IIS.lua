@@ -9,7 +9,7 @@
 -- The wrapper of that function in Control.lua passes the entry to IIS.InterruptRequest.
 
 IIS = {}
-IIS.version = "0.8.2"
+IIS.version = "0.9.0"
 local R = IISRules
 local Mem = IISMemory
 

@@ -4,7 +4,7 @@ This file lists the changes in each version of the mod. The format follows [Keep
 
 A version is `version_major.version_minor` and a patch number. The game shows the build number, which is `version` in `mod/metadata.lua`. When you bump `version`, add a section here.
 
-## Unreleased
+## 0.9.0 (build 15), beta
 
 ### Added
 
@@ -16,6 +16,10 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 - An enemy interrupt ends after 45 seconds if the AI does not finish. Enemy Overwatch fires before an enemy interrupt on the same step, and a merc that it downs gets no interrupt. The mod blocks saves during an enemy interrupt, and a load ends it (#51).
 - The "Log level" option: Error (the default), Info or Debug. Each level also writes the lines of the levels before it. Each `[IIS]` line gives its level, for example `[IIS] [INFO]`. The lines that give the version, the loaded mods, the hooks and the options show at every level (#55).
 - At the Info log level, an Enemy interrupt writes the visibility of each interrupter, the camera position, and the Shooting Stance and carried AP of each interrupter. Each unit that dies or goes down during an interrupt writes a line (#56).
+
+### Fixed
+
+- The mod no longer writes "undefined global" errors for `IIS`, `IISControl` and `IOS` to the game log at load (#45).
 
 ### Removed
 
