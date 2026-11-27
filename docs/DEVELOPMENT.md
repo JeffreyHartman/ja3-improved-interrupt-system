@@ -192,3 +192,7 @@ The log shows AP in the scale that the game shows (`IIS.FormatAP` divides raw AP
 | `INT #N ... failed` | A part of the interrupt failed with a Lua error. The interrupt continues without that part. |
 | `stops at`, `re-plans from its tile` | "Stop" mode: the enemy stays on its tile, gets back AP and plans its attacks again. |
 | `TurnEnded` | The check counts of the turn and the IIS counters by session id (`a<-enemy=5`). At `Debug`, also the skip reasons and the action counts. |
+
+## Release
+
+`release/README.md` gives the steps for a Steam Workshop and a Nexus Mods upload. `tools/set-description.py` writes `release/workshop.txt` into `mod/metadata.lua`, `tools/images.py` makes the preview image and the screenshots, and `tools/package.sh` makes the Nexus zip.

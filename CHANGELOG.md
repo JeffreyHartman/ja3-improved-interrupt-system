@@ -17,6 +17,10 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 - The "Log level" option: Error (the default), Info or Debug. Each level also writes the lines of the levels before it. Each `[IIS]` line gives its level, for example `[IIS] [INFO]`. The lines that give the version, the loaded mods, the hooks and the options show at every level (#55).
 - At the Info log level, an Enemy interrupt writes the visibility of each interrupter, the camera position, and the Shooting Stance and carried AP of each interrupter. Each unit that dies or goes down during an interrupt writes a line (#56).
 
+### Changed
+
+- The mod title is "Improved Interrupt System (JA2 1.13 Interrupts)", and the mod description is the Workshop description. The Workshop tag is "Combat & AI". The tag before it was not a game tag, so Steam showed no tag.
+
 ### Fixed
 
 - The mod no longer writes "undefined global" errors for `IIS`, `IISControl` and `IOS` to the game log at load (#45).

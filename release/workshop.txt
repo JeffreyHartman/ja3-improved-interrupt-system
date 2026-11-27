@@ -1,0 +1,50 @@
+Your mercs can interrupt the enemy turn, the way they could in Jagged Alliance 2 v1.13. The enemy can interrupt your turn too.
+
+BETA. Interrupts change the balance a lot, and there will be bugs. Please report them (see the end of this page).
+
+WHAT IT DOES
+
+Interrupts
+In vanilla JA3, Overwatch is the only way to react in the enemy turn. With this mod, a merc who sees an enemy act can interrupt it. The enemy stops, and you give orders to the mercs who won the interrupt, with the AP they have left. Press End Turn to give the turn back to the enemy.
+
+There are two rule sets. Both come from the JA2 1.13 source code.
+- IIS (the 1.13 default): each merc counts a part of the AP that a seen enemy spends. When the count reaches the merc's reaction time, the merc interrupts. Agility, level, AP left, wounds and fatigue all change the result.
+- JA2 Classic: when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins.
+
+A merc needs enough AP for its default attack to interrupt. The interrupt ends when you press End Turn, or when no merc in it has the AP for one more step.
+
+Enemy interrupts
+This works both ways. When your merc moves or attacks where an enemy can see it, the enemy can interrupt. A merc that moves stops on its tile and gets back the AP for the rest of its path. The AI plays the enemies that won, and then you get control back. If you only want your side to interrupt, turn off "Enemy interrupts".
+
+Collective interrupts
+Teammates within 5 tiles of the winner can join the interrupt. Leadership, level, Agility and Wisdom decide the chance.
+
+Improved Overwatch System (IOS), off by default
+When the Overwatch of a merc triggers, the game pauses and you take the shot yourself. You choose the target, the aim and the fire mode, or you do not shoot. The Overwatch AP that you do not spend stays for the next trigger. IOS works with or without the interrupts.
+
+SETTINGS
+
+Each option has a help text in Mod Options. The options that change the game most:
+- Interrupt System (Experimental): IIS, JA2 Classic or Off.
+- Enemy interrupts: on or off.
+- IIS reaction time and IIS AP registered (%): how often interrupts happen. A lower reaction time or a higher AP percent gives more interrupts.
+- Interrupted enemy: Stop (1.13: the enemy stays on its tile) or Continue (the enemy walks on after the interrupt).
+- Improved Overwatch System (IOS): on or off.
+
+All options with their defaults:
+https://github.com/JeffreyHartman/ja3-improved-interrupt-system#options
+
+GOOD TO KNOW
+
+- To turn the mod off in a campaign, set "Interrupt System" to Off and turn IOS off. Do not disable the mod in the Mod Manager. A save that used the mod turns it back on.
+- You cannot save during an enemy interrupt.
+- If a merc hangs during an interrupt, press End Turn two times.
+- Works with vanilla JA3 and with Rato's Gameplay Balance and Overhaul 4 (GBO 4). Co-op is not supported.
+- Not in yet: militia interrupts, counter-interrupts and interrupts from noise.
+
+BUG REPORTS
+
+Set "Log level" to Info in Mod Options and play until the bug happens. Then post the lines that start with [IIS] from the newest JA3 log in %AppData%\Jagged Alliance 3\logs. Post them in the comments or as a GitHub issue:
+https://github.com/JeffreyHartman/ja3-improved-interrupt-system/issues
+
+The interrupt rules come from the JA2 1.13 project. Source code (MIT): https://github.com/JeffreyHartman/ja3-improved-interrupt-system
