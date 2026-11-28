@@ -28,7 +28,7 @@ Each option has a help text in Mod Options. The options that change the game mos
 - Interrupt System (Experimental): IIS, JA2 Classic or Off.
 - Enemy interrupts: on or off.
 - IIS reaction time and IIS AP registered (%): how often interrupts happen. A lower reaction time or a higher AP percent gives more interrupts.
-- Interrupted enemy: Stop (1.13: the enemy stays on its tile) or Continue (the enemy walks on after the interrupt).
+- After Interrupt: Stop (1.13: the enemy stays on its tile) or Continue (the enemy walks on after the interrupt).
 - Improved Overwatch System (IOS): on or off.
 
 All options with their defaults:

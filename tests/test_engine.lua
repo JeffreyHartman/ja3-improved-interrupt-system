@@ -597,13 +597,15 @@ t.case("The options list: no removed option, and each option has the color tag o
 	t.eq(table.concat(names.IOSActions.ChoiceList, ","), "Shot only,Any action")
 	t.eq(names.IOSActions.DefaultValue, "Shot only")
 	t.eq(names.IOSActions.DisplayName:match("<color (%w+)>"), group_colors.IOS)
-	t.eq(names.IOSActions.Help:find("GBO 4") ~= nil, true)
 end)
 
-t.case("The options list: the help text of each option says what changes under GBO 4", function()
+local names_gbo4 = { IOSFreeAim = true, IOSFullAim = true }
+
+t.case("The options list: only IOSFreeAim and IOSFullAim name GBO 4, and each help text has paragraphs", function()
 	for _, item in ipairs(LoadModFile("mod/items.lua")) do
 		if item.class:find("^ModItemOption") then
-			t.eq(item.Help:find("GBO 4", 1, true) ~= nil, true, item.name)
+			t.eq(item.Help:find("GBO 4", 1, true) ~= nil, names_gbo4[item.name] == true, item.name)
+			t.eq(item.Help:find("\n\n", 1, true) ~= nil, true, item.name)
 		end
 	end
 end)
@@ -2126,7 +2128,7 @@ t.case("IOS: a pass costs nothing, and Overwatch stays with all its attacks", fu
 	t.eq(during, 8000)
 end)
 
-t.case("IOS: the mover continues after the interrupt with \"Interrupted enemy = Stop\"", function()
+t.case("IOS: the mover continues after the interrupt with \"After Interrupt = Stop\"", function()
 	local mover, _, dummies = WalkingMover(10)
 	local ow = Overwatcher{}
 	SetIOS(true)

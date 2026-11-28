@@ -20,6 +20,7 @@ A version is `version_major.version_minor` and a patch number. The game shows th
 ### Changed
 
 - The mod title is "Improved Interrupt System (JA2 1.13 Interrupts)", and the mod description is the Workshop description. The Workshop tag is "Combat & AI". The tag before it was not a game tag, so Steam showed no tag.
+- Each option help text starts with one sentence that says what the option does, and has a paragraph for each choice. Only "IOS free aim levels" and "IOS full aim under GBO 4" name GBO 4. The "Interrupted enemy" option is now "After Interrupt" (#62).
 
 ### Fixed
 
