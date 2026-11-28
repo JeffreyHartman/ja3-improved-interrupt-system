@@ -9,7 +9,7 @@ local E = IIS.E
 local Error, Info, Debug, Always = IIS.Error, IIS.Info, IIS.Debug, IIS.Always
 local Name, AP, Pos, NameList = IIS.Name, IIS.AP, IIS.Pos, IIS.NameList
 
-IISControl = IISControl or {}
+IISControl = {}
 
 local active = false
 local interrupt_count = 0

@@ -14,12 +14,12 @@ Release as a beta when all of these are done.
 - [x] Save and load after a combat with interrupts. A load keeps the IIS counters (#41) and the IOS pool, and a load during an interrupt ends the interrupt (#42). See [save and load research](docs/research/save-load.md).
 - [ ] Play several full combats in a campaign, not only in the mod editor.
 - [ ] Decide how often interrupts must happen, and set the defaults (#2).
-- [ ] Add enemy interrupts (#44). See [Enemy interrupts](#enemy-interrupts).
+- [x] Add enemy interrupts (#44). See [Enemy interrupts](#enemy-interrupts).
 - [ ] Decide if enemy Overwatch must change when enemy interrupts work. See [Overwatch and the Interrupt System](#overwatch-and-the-interrupt-system).
 - [x] Remove the "End Interrupt at 0 AP" and "Need AP for an attack" options, and always use both rules (#28).
 - [ ] Check the GBO 4 Shooting Stance carry-over. GBO 4 saves the carried AP at the end of the turn, so AP that a merc spends in a later interrupt can carry over too.
-- [ ] Change the status line in the README to beta.
-- [ ] Bump the version.
+- [x] Change the status line in the README to beta.
+- [x] Bump the version.
 
 ## Improved Overwatch System
 

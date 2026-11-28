@@ -8,8 +8,8 @@
 -- Unit:ProvokeOpportunityAttacksFromList in the enemy's command thread, and the AI turn waits.
 -- The wrapper of that function in Control.lua passes the entry to IIS.InterruptRequest.
 
-IIS = IIS or {}
-IIS.version = "0.8.2"
+IIS = {}
+IIS.version = "0.9.0"
 local R = IISRules
 local Mem = IISMemory
 

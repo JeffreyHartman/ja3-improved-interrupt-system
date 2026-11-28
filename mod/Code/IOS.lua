@@ -2,7 +2,7 @@
 -- Overwatch trigger of a merc happens, the merc acts in an interrupt as an overwatcher in place of
 -- the vanilla Overwatch shot. It pays from an AP pool that it keeps in its Overwatch state.
 
-IOS = IOS or {}
+IOS = {}
 
 local E = IIS.E
 local Info, Always, Name, FormatAP = IIS.Info, IIS.Always, IIS.Name, IIS.FormatAP

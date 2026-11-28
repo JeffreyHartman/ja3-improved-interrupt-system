@@ -2,7 +2,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "InterruptSystem",
 		'DisplayName', "<color AmmoHPColor>Interrupt System (Experimental)</color>",
-		'Help', "IIS (the JA2 1.13 default): each merc counts the AP that a seen enemy spends. When the count reaches the merc's reaction time, the merc interrupts. JA2 Classic: when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins, a tie goes to the enemy, and an enemy that cannot see the merc always loses. Off: no IIS or JA2 Classic interrupts. The mod stays loaded, because saves turn it back on. Under GBO 4, attacks cost more AP. Thus a merc counts more AP from an enemy attack, and a merc needs the GBO 4 cost of its attack to win an interrupt.",
+		'Help', "Which rules decide when a merc or an enemy interrupts.\n\nIIS (default): the JA2 1.13 system. Each unit counts the AP that the enemies it can see spend. When the count reaches its reaction time, it interrupts.\n\nJA2 Classic: when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score interrupts. A tie goes to the enemy, and an enemy that cannot see the merc always loses.\n\nOff: no IIS or JA2 Classic interrupts. IOS still works.",
 		'DefaultValue', "IIS",
 		'ChoiceList', {
 			"IIS",
@@ -13,19 +13,19 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "Collective",
 		'DisplayName', "<color AmmoHPColor>Collective interrupts (IIS)</color>",
-		'Help', "When a merc or an enemy wins an interrupt, teammates within 5 tiles can join it. A joiner must be on the team of the winner. The chance comes from Leadership, levels, Agility and Wisdom. GBO 4 does not change this option.",
+		'Help', "When a merc or an enemy wins an interrupt, nearby teammates can join it and act too.\n\nEach teammate within 5 tiles of the winner gets a chance to join. The chance goes up with the winner's Leadership and level, and with the teammate's level, Agility and Wisdom.\n\nAffects: IIS only.",
 		'DefaultValue', true,
 	}),
 	PlaceObj('ModItemOptionToggle', {
 		'name', "EnemyInterrupts",
 		'DisplayName', "<color AmmoHPColor>Enemy interrupts</color>",
-		'Help', "Enemies can interrupt a merc in your turn, with the same rules as mercs. An enemy that wins uses the AP that it kept from its own turn, and the AI picks its actions. The merc stops on its tile and gets back the AP for the rest of its path. An Enemy Interrupt banner shows while the AI plays, and then the merc stays selected if it can still act. This option applies only to IIS and JA2 Classic interrupts. It does nothing when the Interrupt System is Off. GBO 4 does not change this option.",
+		'Help', "Lets enemies interrupt your mercs during your turn.\n\nAffects: IIS and JA2 Classic.",
 		'DefaultValue', true,
 	}),
 	PlaceObj('ModItemOptionChoice', {
 		'name', "AfterInterrupt",
-		'DisplayName', "<color AmmoHPColor>Interrupted enemy</color>",
-		'Help', "Stop (JA2 1.13): the enemy stays on its tile when the interrupt ends. It gets back the AP for the rest of its path and attacks from there. Continue: the enemy walks on to its destination. This option applies only to IIS and JA2 Classic interrupts. GBO 4 does not change this option.",
+		'DisplayName', "<color AmmoHPColor>After Interrupt</color>",
+		'Help', "What an enemy does after your merc interrupts its move.\n\nStop (default): the enemy stays on the tile where the interrupt caught it. It keeps the AP for the rest of its path and acts from there.\n\nContinue: the enemy walks on to the tile it chose.\n\nAffects: IIS and JA2 Classic.",
 		'DefaultValue', "Stop",
 		'ChoiceList', {
 			"Stop",
@@ -35,7 +35,7 @@ return {
 	PlaceObj('ModItemOptionNumber', {
 		'name', "ReactionTime",
 		'DisplayName', "<color AmmoHPColor>IIS reaction time</color>",
-		'Help', "BASIC_REACTION_TIME_LENGTH of JA2 1.13. Lower values give more interrupts. Agility, AP left, wounds and fatigue change it for each merc. Default 25. GBO 4 does not change this option.",
+		'Help', "How fast units react. Lower gives more interrupts, higher gives fewer.\n\nEach unit's own reaction time starts from this value. High Agility makes it shorter. Low AP, wounds, fatigue and shock make it longer.\n\nAffects: IIS.",
 		'DefaultValue', 25,
 		'MinValue', 5,
 		'MaxValue', 60,
@@ -44,7 +44,7 @@ return {
 	PlaceObj('ModItemOptionNumber', {
 		'name', "BasicPercent",
 		'DisplayName', "<color AmmoHPColor>IIS AP registered (%)</color>",
-		'Help', "BASIC_PERCENTAGE_APS_REGISTERED of JA2 1.13: the percent of a seen enemy's AP that a merc counts. Each merc level adds 4%, and distance removes up to 25%. Higher values give more interrupts. Default 60. Under GBO 4, attacks cost more AP, so a merc counts more AP from an enemy attack.",
+		'Help', "How much of the AP that a seen enemy spends counts toward an interrupt. Higher gives more interrupts, lower gives fewer.\n\nEach level of the watcher adds 4%. Distance takes away up to 25%.\n\nAffects: IIS.",
 		'DefaultValue', 60,
 		'MinValue', 30,
 		'MaxValue', 100,
@@ -53,7 +53,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "InterruptAimLimit",
 		'DisplayName', "<color AmmoHPColor>Interrupt aim limit</color>",
-		'Help', "The part of the weapon's aim levels that a merc or an enemy can use in an IIS or JA2 Classic interrupt, rounded up. It simulates a merc that has no time for a full aim. A weapon with 3 aim levels gets 1, 2, 3 or 3 levels. Under GBO 4, a weapon has up to 10 aim levels, so 25% of 10 levels gives 3. The limit never goes below the minimum aim of the shot.",
+		'Help', "Limits how much a unit can aim in an interrupt, as a part of its weapon's aim levels. Lower makes interrupt shots less accurate.\n\nThe value rounds up. With 3 aim levels, 25% allows 1 level and 50% allows 2. A shot always keeps its minimum aim.\n\n100% (default) gives no limit.\n\nAffects: IIS and JA2 Classic. For IOS, see IOS aim limit.",
 		'DefaultValue', "100%",
 		'ChoiceList', {
 			"25%",
@@ -65,7 +65,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "MovingTargetPenalty",
 		'DisplayName', "<color AmmoTracerColor>Moving target penalty</color>",
-		'Help', "A to-hit penalty for a merc's shot in an interrupt at the enemy whose action the interrupt paused. The penalty has the full value when the enemy moved 10 tiles or more across the line of fire in its current move. A shorter move, or a move toward or away from the merc, gives less. When the enemy did not move, the penalty is 0. A reflex sight removes it. 0: no penalty. Under GBO 4 with aimed CTH, the penalty makes the aim cone wider, as other to-hit modifiers do.",
+		'Help', "A to-hit penalty for a shot in an interrupt at the unit whose move the interrupt stopped. Higher makes those shots harder.\n\nThe full penalty applies when the target moved 10 tiles or more across the line of fire. A shorter move, or a move toward or away from the shooter, gives less. A target that did not move gives no penalty. A reflex sight removes the penalty.\n\n0 (default) turns it off.\n\nAffects: IIS, JA2 Classic and IOS.",
 		'DefaultValue', "0",
 		'ChoiceList', {
 			"0",
@@ -78,13 +78,13 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "IOS",
 		'DisplayName', "<color AmmoMatchColor>Improved Overwatch System (IOS)</color>",
-		'Help', "On: when an enemy moves or attacks in the Overwatch cone of a merc, the enemy stops. The merc then acts in an interrupt in place of the automatic Overwatch shot. The merc pays from the AP of its Overwatch attacks, and the AP that it does not spend stays for the next trigger. End Turn with no action costs nothing. The enemy then continues its action. Enemy Overwatch does not change. Under GBO 4, the pool uses the GBO 4 attack costs and Overwatch attack count.",
+		'Help', "Replaces the automatic Overwatch shot with an interrupt, so you choose what the merc does.\n\nWhen an enemy moves or attacks in a merc's Overwatch cone, the enemy stops and the merc acts. The merc spends the AP of its Overwatch attacks. AP that it does not spend stays for the next trigger. End Turn with no action costs nothing, and the enemy then continues.\n\nEnemy Overwatch does not change.",
 		'DefaultValue', false,
 	}),
 	PlaceObj('ModItemOptionChoice', {
 		'name', "IOSActions",
 		'DisplayName', "<color AmmoMatchColor>IOS actions</color>",
-		'Help', "What a merc can do in an IOS interrupt. Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action that its pool pays for. After the interrupt, Overwatch ends when the merc moved, changed stance or did an action that is not an attack or a reload. The rest of the pool is then lost. Otherwise Overwatch stays while the pool pays for one attack. Under GBO 4, an action that removes the Shooting Stance also ends Overwatch.",
+		'Help', "What a merc can do in an IOS interrupt.\n\nShot only (default): shoot at an enemy that the merc can see in its Overwatch cone, or reload.\n\nAny action: any action that the AP pool pays for.\n\nOverwatch stays on after the interrupt while the pool pays for one more attack. A move, a stance change, or any action other than an attack or a reload ends Overwatch, and the merc loses the rest of the pool.\n\nAffects: IOS.",
 		'DefaultValue', "Shot only",
 		'ChoiceList', {
 			"Shot only",
@@ -94,7 +94,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "IOSAimLimit",
 		'DisplayName', "<color AmmoMatchColor>IOS aim limit</color>",
-		'Help', "The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. It simulates a merc that has no time for a full aim. A weapon with 3 aim levels gets 1, 2, 3 or 3 levels. Under GBO 4, a weapon has up to 10 aim levels, so 25% of 10 levels gives 3. The limit never goes below the minimum aim of the shot.",
+		'Help', "Limits how much a merc can aim in an IOS interrupt, as a part of its weapon's aim levels. Lower makes IOS shots less accurate.\n\nThe value rounds up. With 3 aim levels, 25% allows 1 level and 50% allows 2. A shot always keeps its minimum aim.\n\n100% (default) gives no limit.\n\nAffects: IOS.",
 		'DefaultValue', "100%",
 		'ChoiceList', {
 			"25%",
@@ -106,7 +106,7 @@ return {
 	PlaceObj('ModItemOptionChoice', {
 		'name', "IOSFreeAim",
 		'DisplayName', "<color AmmoMatchColor>IOS free aim levels</color>",
-		'Help', "The minimum aim level of a merc's shot in an IOS interrupt, as a prepared weapon gives. The levels up to the minimum cost no AP. The value is a total, not a bonus: a shot that already has a higher minimum keeps it. A merc with Killzone gets 1 free level, or the value of this option when it is higher. Under GBO 4, the Shooting Stance level counts toward the total. Thus the value 1 gives no extra level in the Shooting Stance. Killzone gives the free levels of the GBO 4 Killzone ladder for each new target in the turn.",
+		'Help', "Gives a shot in an IOS interrupt free aim levels, as a prepared weapon does. Higher makes IOS shots more accurate at no extra AP.\n\nThe value is a minimum, not a bonus. A shot that already starts with more aim keeps it. A merc with Killzone gets at least 1.\n\nWith GBO 4, Shooting Stance counts toward the total, so 1 adds nothing in Shooting Stance.\n\nAffects: IOS.",
 		'DefaultValue', "1",
 		'ChoiceList', {
 			"0",
@@ -117,13 +117,13 @@ return {
 	PlaceObj('ModItemOptionToggle', {
 		'name', "IOSFullAim",
 		'DisplayName', "<color AmmoMatchColor>IOS full aim under GBO 4</color>",
-		'Help', "Applies only to GBO 4 in old CTH mode. There, an Overwatch shot gets half of the aim bonus. On: an IOS shot gets the full aim bonus. Off: an IOS shot gets half of the aim bonus, as a GBO 4 Overwatch shot does. The shot stays an Overwatch attack, so the Overwatch perks still work. In aCTH mode (the GBO 4 default) and without GBO 4, this option has no effect, because the aim bonus is not halved.",
+		'Help', "GBO 4 in Old CTH mode halves the aim bonus of Overwatch shots. On gives IOS shots the full aim bonus.\n\nThe shot still counts as Overwatch, so Overwatch perks still work.\n\nAffects: GBO 4 Old CTH only. No effect in aCTH or without GBO 4.",
 		'DefaultValue', false,
 	}),
 	PlaceObj('ModItemOptionChoice', {
 		'name', "LogLevel",
 		'DisplayName', "<color AmmoTracerColor>Log level</color>",
-		'Help', "How much the mod writes to the game log. Error: only errors. Info: errors, and the checks and interrupts. Debug: everything, including one line for each merc in each interrupt check. Set Info when you report a bug. GBO 4 does not change this option.",
+		'Help', "How much the mod writes to the game log.\n\nError (default): errors only.\n\nInfo: errors, plus each interrupt check and each interrupt. Use this level when you report a bug.\n\nDebug: everything, including one line for each unit in each interrupt check. The log gets large.",
 		'DefaultValue', "Error",
 		'ChoiceList', {
 			"Error",

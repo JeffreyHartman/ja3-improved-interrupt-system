@@ -2,7 +2,7 @@
 
 A Jagged Alliance 3 mod that adds the interrupt system of JA2 1.13. During the enemy turn, your mercs can interrupt the enemy. The enemy stops, and you give orders to the mercs that interrupted. During your turn, the enemy can interrupt your mercs.
 
-> **Status:** experimental. Interrupts change the game balance a lot, and bugs are possible.
+> **Status:** beta. Interrupts change the game balance a lot, and bugs are possible.
 
 ## Features
 
@@ -46,13 +46,13 @@ The options list shows each group of options in one color: one color for the Int
 | Interrupt System (Experimental) | Interrupt System | IIS | IIS, JA2 Classic or Off. |
 | Collective interrupts (IIS) | Interrupt System | on | Teammates within 5 tiles of a winner can join. This applies to enemy interrupts too. |
 | Enemy interrupts | Interrupt System | on | Enemies can interrupt a merc in your turn, with the same rules as mercs. A merc that moves stops on its tile. Then the AI plays the enemies that won. This applies only to IIS and JA2 Classic. |
-| Interrupted enemy | Interrupt System | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
+| After Interrupt | Interrupt System | Stop | Stop: the enemy stays on its tile. Continue: it walks on. |
 | IIS reaction time | Interrupt System | 25 | Lower values give more interrupts. |
 | IIS AP registered (%) | Interrupt System | 60 | Higher values give more interrupts. |
-| Interrupt aim limit | Interrupt System | 100% | The part of the weapon's aim levels that a merc or an enemy can use in an IIS or JA2 Classic interrupt, rounded up. |
+| Interrupt aim limit | Interrupt System | 100% | The part of the weapon's aim levels that a merc or an enemy can use in an IIS or JA2 Classic interrupt, rounded up. GBO 4 weapons have up to 10 aim levels, so 25% gives 3. |
 | Improved Overwatch System (IOS) | IOS | off | The Overwatch trigger of a merc starts an interrupt in place of the Overwatch shot. |
-| IOS actions | IOS | Shot only | Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action. A move, a stance change or another action that is not an attack or a reload ends Overwatch. |
-| IOS aim limit | IOS | 100% | The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. |
+| IOS actions | IOS | Shot only | Shot only: the merc can shoot at an enemy in its Overwatch cone that it can see, or reload. Any action: the merc can do any action. A move, a stance change or another action that is not an attack or a reload ends Overwatch. Under GBO 4, an action that removes the Shooting Stance also ends Overwatch. |
+| IOS aim limit | IOS | 100% | The part of the weapon's aim levels that a merc can use in an IOS interrupt, rounded up. GBO 4 weapons have up to 10 aim levels, so 25% gives 3. |
 | IOS free aim levels | IOS | 1 | The minimum aim level of a merc's shot in an IOS interrupt. These levels cost no AP. Killzone gives at least 1. |
 | IOS full aim under GBO 4 | IOS | off | Under GBO 4 in old CTH mode, an IOS shot gets the full aim bonus in place of half. |
 | Moving target penalty | Both systems | 0 | A to-hit penalty for a shot in an interrupt at a unit that moved across the line of fire. It applies to enemy interrupters too. |

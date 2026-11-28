@@ -1,11 +1,11 @@
 return PlaceObj('ModDef', {
-	'title', "Improved Interrupt System",
-	'description', "Experimental. Player-controlled interrupts. The Interrupt System has the two rule sets of JA2 1.13, IIS and JA2 Classic. During the enemy turn, a merc can win an interrupt. The enemy stops, and the mercs that won take orders until you press End Turn. Then the enemy turn continues. The Improved Overwatch System (IOS) pauses the enemy when the Overwatch of a merc triggers. You choose the target, the aim and the fire mode of the shot, or you do not shoot. You can turn on one system or both.",
+	'title', "Improved Interrupt System (JA2 1.13 Interrupts)",
+	'description', "Your mercs can interrupt the enemy turn, the way they could in Jagged Alliance 2 v1.13. The enemy can interrupt your turn too.\n\nBETA. Interrupts change the balance a lot, and there will be bugs. Please report them (see the end of this page).\n\nWHAT IT DOES\n\nInterrupts\nIn vanilla JA3, Overwatch is the only way to react in the enemy turn. With this mod, a merc who sees an enemy act can interrupt it. The enemy stops, and you give orders to the mercs who won the interrupt, with the AP they have left. Press End Turn to give the turn back to the enemy.\n\nThere are two rule sets. Both come from the JA2 1.13 source code.\n- IIS (the 1.13 default): each merc counts a part of the AP that a seen enemy spends. When the count reaches the merc's reaction time, the merc interrupts. Agility, level, AP left, wounds and fatigue all change the result.\n- JA2 Classic: when an enemy comes into view, the merc and the enemy compare level and Agility. The higher score wins.\n\nA merc needs enough AP for its default attack to interrupt. The interrupt ends when you press End Turn, or when no merc in it has the AP for one more step.\n\nEnemy interrupts\nThis works both ways. When your merc moves or attacks where an enemy can see it, the enemy can interrupt. A merc that moves stops on its tile and gets back the AP for the rest of its path. The AI plays the enemies that won, and then you get control back. If you only want your side to interrupt, turn off \"Enemy interrupts\".\n\nCollective interrupts\nTeammates within 5 tiles of the winner can join the interrupt. Leadership, level, Agility and Wisdom decide the chance.\n\nImproved Overwatch System (IOS), off by default\nWhen the Overwatch of a merc triggers, the game pauses and you take the shot yourself. You choose the target, the aim and the fire mode, or you do not shoot. The Overwatch AP that you do not spend stays for the next trigger. IOS works with or without the interrupts.\n\nSETTINGS\n\nEach option has a help text in Mod Options. The options that change the game most:\n- Interrupt System (Experimental): IIS, JA2 Classic or Off.\n- Enemy interrupts: on or off.\n- IIS reaction time and IIS AP registered (%): how often interrupts happen. A lower reaction time or a higher AP percent gives more interrupts.\n- After Interrupt: Stop (1.13: the enemy stays on its tile) or Continue (the enemy walks on after the interrupt).\n- Improved Overwatch System (IOS): on or off.\n\nAll options with their defaults:\nhttps://github.com/JeffreyHartman/ja3-improved-interrupt-system#options\n\nGOOD TO KNOW\n\n- To turn the mod off in a campaign, set \"Interrupt System\" to Off and turn IOS off. Do not disable the mod in the Mod Manager. A save that used the mod turns it back on.\n- You cannot save during an enemy interrupt.\n- If a merc hangs during an interrupt, press End Turn two times.\n- Works with vanilla JA3 and with Rato's Gameplay Balance and Overhaul 4 (GBO 4). Co-op is not supported.\n- Not in yet: militia interrupts, counter-interrupts and interrupts from noise.\n\nBUG REPORTS\n\nSet \"Log level\" to Info in Mod Options and play until the bug happens. Then post the lines that start with [IIS] from the newest JA3 log in %AppData%\\Jagged Alliance 3\\logs. Post them in the comments or as a GitHub issue:\nhttps://github.com/JeffreyHartman/ja3-improved-interrupt-system/issues\n\nThe interrupt rules come from the JA2 1.13 project. Source code (MIT): https://github.com/JeffreyHartman/ja3-improved-interrupt-system",
 	'id', "ImprovedInterruptSystem",
 	'author', "jeff",
 	'version_major', 0,
-	'version_minor', 8,
-	'version', 14,
+	'version_minor', 9,
+	'version', 15,
 	'lua_revision', 233360,
 	'saved_with_revision', 366685,
 	'code', {
@@ -34,5 +34,5 @@ return PlaceObj('ModDef', {
 		IOSFreeAim = "1",
 		IOSFullAim = false,
 	},
-	'TagGameplay', true,
+	'TagCombat&AI', true,
 })
