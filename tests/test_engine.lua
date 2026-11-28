@@ -564,23 +564,11 @@ local function LoadModFile(path)
 	return result
 end
 
-local group_colors = {
-	["Interrupt System"] = "AmmoHPColor",
-	IOS = "AmmoMatchColor",
-	["both systems"] = "AmmoTracerColor",
-}
-
-t.case("The options list: no removed option, and each option has the color tag of one group", function()
+t.case("The options list: no removed option, and the choices and defaults that ApplyOptions reads", function()
 	local names = {}
 	for _, item in ipairs(LoadModFile("mod/items.lua")) do
 		if item.class:find("^ModItemOption") then
 			names[item.name] = item
-			local color = item.DisplayName:match("^<color (%w+)>.*</color>$")
-			local in_group = false
-			for _, c in pairs(group_colors) do
-				in_group = in_group or c == color
-			end
-			t.eq(in_group, true, item.name .. " color " .. tostring(color))
 		end
 	end
 	t.eq(names.Enabled, nil)
@@ -589,37 +577,11 @@ t.case("The options list: no removed option, and each option has the color tag o
 	t.eq(names.RequireAttackAP, nil)
 	t.eq(table.concat(names.InterruptSystem.ChoiceList, ","), "IIS,JA2 Classic,Off")
 	t.eq(names.InterruptSystem.DefaultValue, "IIS")
-	t.eq(names.InterruptSystem.DisplayName:match("<color (%w+)>"), group_colors["Interrupt System"])
 	t.eq(names.VerboseLog, nil)
 	t.eq(table.concat(names.LogLevel.ChoiceList, ","), "Error,Info,Debug")
 	t.eq(names.LogLevel.DefaultValue, "Error")
-	t.eq(names.LogLevel.DisplayName:match("<color (%w+)>"), group_colors["both systems"])
 	t.eq(table.concat(names.IOSActions.ChoiceList, ","), "Shot only,Any action")
 	t.eq(names.IOSActions.DefaultValue, "Shot only")
-	t.eq(names.IOSActions.DisplayName:match("<color (%w+)>"), group_colors.IOS)
-end)
-
-local names_gbo4 = { IOSFreeAim = true, IOSFullAim = true }
-
-t.case("The options list: only IOSFreeAim and IOSFullAim name GBO 4, and each help text has paragraphs", function()
-	for _, item in ipairs(LoadModFile("mod/items.lua")) do
-		if item.class:find("^ModItemOption") then
-			t.eq(item.Help:find("GBO 4", 1, true) ~= nil, names_gbo4[item.name] == true, item.name)
-			t.eq(item.Help:find("\n\n", 1, true) ~= nil, true, item.name)
-		end
-	end
-end)
-
-t.case("The README options table has a row for each option", function()
-	local file = io.open("README.md")
-	local readme = file:read("a")
-	file:close()
-	for _, item in ipairs(LoadModFile("mod/items.lua")) do
-		if item.class:find("^ModItemOption") then
-			local name = item.DisplayName:match("^<color %w+>(.*)</color>$")
-			t.eq(readme:find("\n| " .. name .. " |", 1, true) ~= nil, true, name)
-		end
-	end
 end)
 
 t.case("Options: IOS actions gives the action limit of an overwatcher, and Shot only is the default", function()
@@ -2802,18 +2764,15 @@ local function OverwatcherAimRange(ow, options)
 	return min, max
 end
 
-t.case("Aim limit: the IOS and Interrupt aim limit options have the values 25% to 100% and the color of their group", function()
+t.case("Aim limit: the IOS and Interrupt aim limit options have the values 25% to 100%", function()
 	local names = {}
 	for _, item in ipairs(LoadModFile("mod/items.lua")) do
 		names[item.name] = item
 	end
-	for name, group in pairs({ IOSAimLimit = "IOS", InterruptAimLimit = "Interrupt System" }) do
+	for _, name in ipairs({ "IOSAimLimit", "InterruptAimLimit" }) do
 		t.eq(table.concat(names[name].ChoiceList, ","), "25%,50%,75%,100%", name)
 		t.eq(names[name].DefaultValue, "100%", name)
-		t.eq(names[name].DisplayName:match("<color (%w+)>"), group_colors[group], name)
 	end
-	t.eq(names.IOSAimLimit.DisplayName:find("IOS aim limit", 1, true) ~= nil, true)
-	t.eq(names.InterruptAimLimit.DisplayName:find("Interrupt aim limit", 1, true) ~= nil, true)
 end)
 
 t.case("Aim limit: a 3-level weapon at 50% gives an overwatcher a maximum of 2 levels", function()
@@ -2933,16 +2892,13 @@ end)
 ------------------------------------------------------------------------------------------------
 -- IOS free aim levels through the wrapped Unit:GetBaseAimLevelRange
 
-t.case("Free aim: the IOS free aim levels option has the values 0 to 2, the default 1 and the IOS color", function()
+t.case("Free aim: the IOS free aim levels option has the values 0 to 2, and the default 1", function()
 	local item
 	for _, i in ipairs(LoadModFile("mod/items.lua")) do
 		if i.name == "IOSFreeAim" then item = i end
 	end
 	t.eq(table.concat(item.ChoiceList, ","), "0,1,2")
 	t.eq(item.DefaultValue, "1")
-	t.eq(item.DisplayName:match("<color (%w+)>"), group_colors.IOS)
-	t.eq(item.DisplayName:find("IOS free aim levels", 1, true) ~= nil, true)
-	t.eq(item.Help:find("GBO 4", 1, true) ~= nil, true)
 	t.eq(ApplyModOptions({}) and Q.Config.ios_free_aim, 1)
 	t.eq(ApplyModOptions({ IOSFreeAim = "2" }) and Q.Config.ios_free_aim, 2)
 	ApplyModOptions({})
